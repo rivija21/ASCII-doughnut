@@ -1,39 +1,33 @@
-// terminal.cpp - The only Windows-specific file. See terminal.h for the overview.
+// terminal.cpp - The parts of terminal.h that are the same on every operating system:
+//                colours, the Canvas and the frame clock. See terminal.h for the overview.
+//
+// They need only three things from the operating system, declared in platform.h: write bytes to
+// the terminal, sleep, and "can it show exact RGB colours?". platform_windows.cpp and
+// platform_mac.cpp provide those (and the rest of term::), one file per system.
 #include "terminal.h"
-
-#ifndef NOMINMAX
-#define NOMINMAX        // stop <windows.h> defining min/max macros that break std::min/std::max
-#endif
-#include <windows.h>
-#include <mmsystem.h>   // timeBeginPeriod (needs -lwinmm when linking)
-#include <conio.h>      // _kbhit, _getch
+#include "platform.h"
 
 #include <algorithm>
-#include <atomic>
-#include <cctype>
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
-
-#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
-#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
-#endif
 
 namespace {
 
-HANDLE hOut = INVALID_HANDLE_VALUE;
-DWORD originalMode = 0;
-std::atomic<bool> active{false};
-
-void writeRaw(const std::string& s) {
-    DWORD written = 0;
-    WriteFile(hOut, s.data(), DWORD(s.size()), &written, nullptr);
-}
-
-// Called by Windows (on another thread) when you press Ctrl+C.
-BOOL WINAPI onCtrlC(DWORD) {
-    term::restore();
-    return FALSE;   // "not handled": Windows then runs its default handler, which ends the program
+// Older terminals (like Apple's Terminal before macOS 26) can't show exact RGB colours, only a
+// fixed palette of 256: 16 basic colours, a 6x6x6 colour cube (16..231) and 24 greys (232..255).
+// Return the palette entry nearest to c.
+int nearest256(Color c) {
+    static const int kLevel[6] = {0, 95, 135, 175, 215, 255};   // the 6 values a cube channel can take
+    auto cubeStep = [](int v) { return v < 48 ? 0 : v < 115 ? 1 : (v - 35) / 40; };   // nearest level
+    const int r = cubeStep(c.r), g = cubeStep(c.g), b = cubeStep(c.b);
+    const int grey = std::clamp(((c.r + c.g + c.b) / 3 - 3) / 10, 0, 23);   // greys are 8, 18, .. 238
+    auto distance = [c](int R, int G, int B) {
+        return (R - c.r) * (R - c.r) + (G - c.g) * (G - c.g) + (B - c.b) * (B - c.b);
+    };
+    const int greyValue = 8 + 10 * grey;
+    return distance(kLevel[r], kLevel[g], kLevel[b]) <= distance(greyValue, greyValue, greyValue)
+               ? 16 + 36 * r + 6 * g + b
+               : 232 + grey;
 }
 
 }  // namespace
@@ -95,7 +89,9 @@ void Canvas::text(int x, int y, const std::string& s, Color fg) {
 //   ESC[?2026h ... ESC[?2026l   "synchronised update": the terminal shows the frame all at once
 //   ESC[<row>;<col>H            move the cursor (rows and columns start at 1)
 //   ESC[38;2;<r>;<g>;<b>m       set the text colour to an exact RGB value ("true colour")
+//   ESC[38;5;<n>m               set the text colour to entry n of the 256-colour palette
 void Canvas::present() {
+    const bool rgb = platform::trueColour();
     out_.clear();
     out_ += "\x1b[?2026h";
     char buf[32];
@@ -110,7 +106,8 @@ void Canvas::present() {
             const Cell& c = cells_[y * w_ + x];
             // Only send a colour code when it changes. Spaces are invisible, so they never need one.
             if (c.ch != ' ' && (!haveColour || c.fg != current)) {
-                n = std::snprintf(buf, sizeof buf, "\x1b[38;2;%d;%d;%dm", c.fg.r, c.fg.g, c.fg.b);
+                n = rgb ? std::snprintf(buf, sizeof buf, "\x1b[38;2;%d;%d;%dm", c.fg.r, c.fg.g, c.fg.b)
+                        : std::snprintf(buf, sizeof buf, "\x1b[38;5;%dm", nearest256(c.fg));
                 out_.append(buf, n);
                 current = c.fg;
                 haveColour = true;
@@ -119,68 +116,13 @@ void Canvas::present() {
         }
     }
     out_ += "\x1b[?2026l";
-    writeRaw(out_);   // one big write per frame = no flicker
+    platform::write(out_);   // one big write per frame = no flicker
 }
 
 // ------------------------------------------------------------------ console
+// term::init, restore, size and readKey are different on every system: see platform_*.cpp.
 
-void term::init() {
-    hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (!GetConsoleMode(hOut, &originalMode)) {
-        std::fprintf(stderr, "Not running in a Windows console. Use Windows Terminal, PowerShell or cmd.\n");
-        std::exit(1);
-    }
-    // Ask the console to understand ANSI escape codes (colours, cursor movement...).
-    if (!SetConsoleMode(hOut, originalMode | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) {
-        std::fprintf(stderr, "This console does not support ANSI escape codes. Try Windows Terminal.\n");
-        std::exit(1);
-    }
-    SetConsoleTitleA("ASCII Simulations");
-    SetConsoleCtrlHandler(onCtrlC, TRUE);
-    timeBeginPeriod(1);   // let Sleep() wake within ~1 ms instead of ~16 ms -> smoother frames
-    active = true;
-    //   ESC[?1049h  switch to the "alternate screen" (your normal scrollback is left untouched)
-    //   ESC[?25l    hide the blinking cursor
-    //   ESC[?7l     don't auto-wrap at the right edge
-    //   ESC[2J      clear the screen
-    writeRaw("\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[2J");
-}
-
-void term::restore() {
-    if (!active.exchange(false)) return;   // already restored (e.g. Ctrl+C, then normal exit)
-    // reset colour, auto-wrap back on, show cursor, return to the normal screen
-    writeRaw("\x1b[0m\x1b[?7h\x1b[?25h\x1b[?1049l");
-    SetConsoleMode(hOut, originalMode);
-    timeEndPeriod(1);
-}
-
-void term::size(int& cols, int& rows) {
-    CONSOLE_SCREEN_BUFFER_INFO info;
-    if (GetConsoleScreenBufferInfo(hOut, &info)) {
-        cols = info.srWindow.Right - info.srWindow.Left + 1;
-        rows = info.srWindow.Bottom - info.srWindow.Top + 1;
-    } else {
-        cols = 80;
-        rows = 25;
-    }
-}
-
-int term::readKey() {
-    if (!_kbhit()) return KEY_NONE;
-    const int k = _getch();
-    if (k == 0 || k == 224) {   // arrow keys arrive as two codes: a 0 or 224 prefix, then the key
-        switch (_getch()) {
-            case 72: return KEY_UP;
-            case 80: return KEY_DOWN;
-            case 75: return KEY_LEFT;
-            case 77: return KEY_RIGHT;
-            default: return KEY_NONE;
-        }
-    }
-    return std::tolower(k);
-}
-
-void term::clearScreen() { writeRaw("\x1b[2J"); }
+void term::clearScreen() { platform::write("\x1b[2J"); }
 
 // ------------------------------------------------------------------ timing
 
@@ -194,7 +136,7 @@ double FrameClock::tick() {
     next_ += period_;
     const auto now = Clock::now();
     if (next_ > now)
-        Sleep(DWORD(std::chrono::duration_cast<std::chrono::milliseconds>(next_ - now).count()));
+        platform::sleepFor(next_ - now);
     else
         next_ = now;   // running late: don't try to "catch up" with a burst of frames
     const auto t = Clock::now();

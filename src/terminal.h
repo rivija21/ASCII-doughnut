@@ -1,14 +1,15 @@
-// terminal.h - A tiny "graphics library" for drawing animations in a Windows console.
+// terminal.h - A tiny "graphics library" for drawing animations in a terminal (Windows or macOS).
 //
-// The simulations never talk to Windows directly. They only use what is declared here:
+// The simulations never talk to the operating system directly. They only use what is declared here:
 //
 //   Color, Canvas  - an off-screen grid of coloured characters (a "frame buffer").
 //                    Draw a whole frame into it, then call present() once to show it.
 //   term::...      - switch the console into animation mode, read keys, get its size.
 //   FrameClock     - keeps a steady frame rate and tells you how much time has passed.
 //
-// Only terminal.cpp includes <windows.h>, so porting this project to Linux or macOS
-// means rewriting that one file and nothing else.
+// terminal.cpp implements the parts that are the same everywhere. The term:: functions are
+// different on each system, so they live in platform_windows.cpp and platform_mac.cpp (see
+// platform.h). Porting to another system means writing one more of those files.
 #pragma once
 
 #include <chrono>

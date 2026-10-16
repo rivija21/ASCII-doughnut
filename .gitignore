@@ -1,3 +1,4 @@
-# Build output: rebuild with build.bat
+# Build output: rebuild with build.bat (Windows) or ./build.sh (macOS)
 *.exe
 *.o
+ascii-sims

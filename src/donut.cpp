@@ -1,13 +1,16 @@
-// donut.cpp - The famous spinning ASCII donut (after Andy Sloane's donut.c, 2006).
+// donut.cpp - The famous spinning ASCII donut (after Andy Sloane's donut.c, 2006), which can
+//             also FLY: it swoops around a figure-8 through 3D space, towards you and away.
 //
 // The idea in one sentence: sample thousands of points on the surface of a torus, rotate
-// them in 3D, project them onto the 2D terminal, keep only the point nearest the viewer in
-// each cell (the z-buffer), and pick a character whose "amount of ink" matches how brightly
-// that point is lit.
+// them in 3D, move them to wherever the donut is, project them onto the 2D terminal, keep only
+// the point nearest the viewer in each cell (the z-buffer), and pick a character whose "amount
+// of ink" matches how brightly that point is lit.
 #include "sim.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <deque>
 #include <vector>
 
 namespace {
@@ -18,11 +21,37 @@ constexpr float kTwoPi = 6.2831853f;
 const char kShades[] = ".,-~:;=!*#$@";
 constexpr int kNumShades = sizeof(kShades) - 1;   // 12 (the -1 skips the hidden '\0' at the end)
 
+// The donut and the camera.
+constexpr float R1 = 1.0f;          // radius of the tube (the "dough" thickness)
+constexpr float R2 = 2.0f;          // distance from the donut's centre to the middle of the tube
+constexpr float kOuter = R1 + R2;   // the whole donut fits inside a ball of this radius
+constexpr float K2 = 5.0f;          // distance from the viewer's eye to the donut when it spins in place
+
+// The flight (see flightCentre() below).
+constexpr double kLoopSeconds = 12.0;           // one trip round the figure-8, at speed x1
+constexpr float kNearZ = 6.0f, kFarZ = 14.0f;   // the closest and furthest the centre gets
+constexpr float kFogDensity = 0.06f;            // how fast far-away things fade (per unit of distance)
+constexpr float kFlyZoom = 2.5f;                // flying uses a longer camera lens (see zoom())
+constexpr double kGlideSeconds = 1.5;           // time to glide between spinning in place and flying
+constexpr int kTrailLen = 75;                   // remembered centre positions, one per frame (2.5 s)
+
 // ---- a tiny bit of 3D maths ------------------------------------------------
 
 struct Vec3 {
     float x, y, z;
 };
+
+Vec3 operator+(Vec3 a, Vec3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+// lerp() for points. (Another overload called lerp would hide the Color one from terminal.h.)
+Vec3 mix(Vec3 a, Vec3 b, float t) { return {a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t}; }
+
+// Goes from 0 to 1 like t does, but starts and stops gently (its slope is 0 at both ends).
+float smoothstep(float t) { return t * t * (3 - 2 * t); }
+
+// Fog: the further away, the more colours fade into the black background. Light crossing haze
+// loses the same FRACTION of itself for every unit of distance, so what's left falls off
+// exponentially (the Beer-Lambert law). At z = K2, where the donut spins in place, nothing fades.
+float fog(float z) { return std::min(1.0f, std::exp(-kFogDensity * (z - K2))); }
 
 // The cosine and sine of an angle, computed once and reused for many points.
 struct Rotation {
@@ -50,44 +79,56 @@ public:
         }
     }
 
-    const char* name() const override { return "Spinning Donut"; }
-    const char* help() const override { return "+/- speed  C colour"; }
+    const char* name() const override { return flying_ ? "Flying Donut" : "Spinning Donut"; }
+    const char* help() const override { return "M fly/spin  T trail  +/- speed  C colour"; }
 
     void resize(int w, int h) override {
         w_ = w;
         h_ = h;
         zbuf_.assign(size_t(w) * h, 0.0f);
+        trail_.clear();   // the remembered positions were worked out for the old window size
     }
 
     void onKey(int key) override {
         if (key == '+' || key == '=') speed_ = std::min(speed_ * 1.25, 8.0);
         if (key == '-') speed_ = std::max(speed_ / 1.25, 0.1);
         if (key == 'c') colour_ = !colour_;
+        if (key == 'm') flying_ = !flying_;
+        if (key == 't') showTrail_ = !showTrail_;
     }
 
     void update(double dt) override {
-        // The donut tumbles around two axes at different speeds, so it never repeats exactly.
+        // The donut tumbles around two axes at different speeds. (1.2 is exactly twice 0.6, so the
+        // tumble repeats every 2*pi / 0.6 = 10.5 seconds, when B has turned once and A twice.)
         angleA_ += 1.2 * speed_ * dt;   // radians per second around the X axis
         angleB_ += 0.6 * speed_ * dt;   // radians per second around the Z axis
+
+        // Move along the figure-8: t goes once round from 0 to 2*pi every kLoopSeconds.
+        flightT_ = std::fmod(flightT_ + kTwoPi / kLoopSeconds * speed_ * dt, double(kTwoPi));
+
+        // Glide between spinning in place (fly_ = 0) and flying (fly_ = 1) instead of jumping.
+        const double glide = dt / kGlideSeconds;
+        fly_ = std::clamp(fly_ + (flying_ ? glide : -glide), 0.0, 1.0);
+
+        // The trail remembers where the centre has been. Once the donut stops flying it shrinks away.
+        if (fly_ > 0) trail_.push_back(centre());
+        if (int(trail_.size()) > kTrailLen || (fly_ == 0 && !trail_.empty())) trail_.pop_front();
     }
 
     void draw(Canvas& cv) override {
-        const float R1 = 1.0f;   // radius of the tube (the "dough" thickness)
-        const float R2 = 2.0f;   // distance from the donut's centre to the middle of the tube
-        const float K2 = 5.0f;   // distance from the viewer's eye to the donut
-
-        // A terminal cell is about twice as tall as it is wide, so the window is "2*h_" columns tall
-        // if we measured it in square units. Use whichever direction is smaller.
-        const float size = std::min(float(w_), 2.0f * h_);
-        // K1 converts "x / z" into screen cells. This choice makes the donut fill ~3/4 of the window.
-        const float K1 = size * K2 * 3.0f / (8.0f * (R1 + R2));
+        // The camera (see zoom()). The lens and the donut's distance grow together, so the donut
+        // still looks the same size, and its centre still lands on the same cell.
+        const float zoom = this->zoom();
+        const float K1 = focal() * zoom;
+        const Vec3 seen = centre();                     // where the donut appears, in "zoom 1" units
+        const Vec3 c{seen.x, seen.y, seen.z * zoom};    // where it really is
 
         // How far apart to sample points. Neighbouring points must land less than one cell apart on
-        // screen, even on the part of the donut nearest the viewer (z = K2 - R1 - R2, where it looks
+        // screen, even on the part of the donut nearest the viewer (z = c.z - R1 - R2, where it looks
         // biggest). Otherwise some cells get skipped and the back of the donut shows through the gaps.
-        const float zNearest = K2 - R1 - R2;
-        const float thetaStep = std::min(0.07f, 0.9f * zNearest / (K1 * R1));          // around the tube
-        const float phiStep = std::min(0.02f, 0.9f * zNearest / (K1 * (R1 + R2)));     // around the donut
+        const float zNearest = c.z - kOuter;
+        const float thetaStep = std::min(0.07f, 0.9f * zNearest / (K1 * R1));      // around the tube
+        const float phiStep = std::min(0.02f, 0.9f * zNearest / (K1 * kOuter));    // around the donut
 
         // phi takes the same values for every theta, so compute their cos/sin once per frame, not
         // once per point. (Trig functions are slow compared to + and *.)
@@ -96,7 +137,12 @@ public:
 
         std::fill(zbuf_.begin(), zbuf_.end(), 0.0f);
         const Rotation rotA{float(angleA_)}, rotB{float(angleB_)};
-        const Color* palette = colour_ ? warm_ : plain_;
+
+        // Fade the colours with distance (fog), once per frame for the whole donut.
+        const Color* base = colour_ ? warm_ : plain_;
+        const float fade = fog(seen.z);
+        Color palette[kNumShades];
+        for (int i = 0; i < kNumShades; ++i) palette[i] = lerp(Color{0, 0, 0}, base[i], fade);
 
         // theta goes around the tube's cross-section (a small circle)...
         for (float theta = 0; theta < kTwoPi; theta += thetaStep) {
@@ -108,13 +154,13 @@ public:
 
             // ...and phi spins that small circle around the Y axis, sweeping out the whole donut.
             for (const Rotation& p : phiTable_) {
-                // Build the donut (rotate by phi), then tumble it (rotate by A, then by B).
-                const Vec3 point = rotateZ(rotateX(rotateY(circlePoint, p), rotA), rotB);
+                // Build the donut (rotate by phi), tumble it (rotate by A, then by B), then move it to
+                // where it is. The normal is a direction, not a place: it turns but doesn't move.
+                const Vec3 point = rotateZ(rotateX(rotateY(circlePoint, p), rotA), rotB) + c;
                 const Vec3 normal = rotateZ(rotateX(rotateY(circleNormal, p), rotA), rotB);
 
                 // Perspective projection: things further away (bigger z) look smaller.
-                const float z = point.z + K2;
-                const float ooz = 1.0f / z;   // "one over z": bigger means closer to the viewer
+                const float ooz = 1.0f / point.z;   // "one over z": bigger means closer to the viewer
                 const int sx = int(w_ / 2.0f + K1 * ooz * point.x);
                 const int sy = int(h_ / 2.0f - K1 * ooz * point.y * 0.5f);   // minus: screen rows go DOWN
                 if (sx < 0 || sx >= w_ || sy < 0 || sy >= h_) continue;
@@ -132,9 +178,89 @@ public:
                 cv.set(sx, sy, kShades[shade], palette[shade]);
             }
         }
+
+        if (showTrail_) drawTrail(cv, focal(), zoom);
+        if (flying_) {
+            char info[96];
+            std::snprintf(info, sizeof info, " flying   depth z = %4.1f   looks %3d%% as big as at z = %g", seen.z,
+                          int(std::lround(100 * K2 / seen.z)), K2);
+            cv.text(0, 0, info, Color{160, 160, 160});
+        }
     }
 
 private:
+    // K1 converts "x / z" into screen columns. This choice makes the donut fill ~3/4 of the window
+    // when it is K2 away. A terminal cell is about twice as tall as it is wide, so the window is
+    // "2*h_" columns tall if we measured it in square units. Use whichever direction is smaller.
+    float focal() const { return std::min(float(w_), 2.0f * h_) * K2 * 3.0f / (8.0f * kOuter); }
+
+    // The camera's lens. Spinning in place uses the original donut.c camera: close up, with a very
+    // wide view (like a phone's 0.5x lens) and strong perspective. But a wide-angle view stretches
+    // things near the edges of the picture, and the flying donut goes right up to the edges. So
+    // when flying, the camera moves kFlyZoom times further back AND zooms in kFlyZoom times: the
+    // donut looks just as big, but the view is narrower and the stretching mostly goes away.
+    // Doing both at once while the donut glides out is the film-makers' "dolly zoom".
+    float zoom() const { return 1 + (kFlyZoom - 1) * smoothstep(float(fly_)); }
+
+    // Where the donut's centre is now, in "zoom 1" units (only its z is multiplied by zoom()):
+    // straight ahead when spinning in place, on the figure-8 when flying, and part-way between
+    // while it glides from one to the other.
+    Vec3 centre() const {
+        const Vec3 still{0, 0, K2};
+        return mix(still, flightCentre(flightT_), smoothstep(float(fly_)));
+    }
+
+    // The flight path: a figure-8 through space, designed in two parts.
+    //   depth   z(t) = middle - swing * cos(2t)   near (big) each time it crosses the middle of the
+    //                                             8, far (small) out at the ends of the two loops
+    //   screen  u(t) = roomX * sin(t)             columns right of the window's centre
+    //           v(t) = roomY * sin(2t)            rows below it. v goes round twice as fast as u,
+    //                                             and that is what draws an 8 (a Lissajous curve).
+    // "room" is how far the centre can go before the donut touches an edge (see room()). A far-away
+    // donut looks smaller, so it can get closer to the edge: the room depends on z.
+    // Finally, undo the projection (see draw()) to find the 3D point that appears at (u, v):
+    //   sx = w/2 + K1 * x / z     =>     x = u * z / K1
+    Vec3 flightCentre(double t) const {
+        const float K1 = focal();
+        const float z = 0.5f * (kNearZ + kFarZ) - 0.5f * (kFarZ - kNearZ) * float(std::cos(2 * t));
+        if (K1 <= 0) return {0, 0, z};
+        const float u = room(w_ / 2.0f - 1, K1, z) * float(std::sin(t));
+        const float v = room(h_ / 2.0f - 1, K1 * 0.5f, z) * float(std::sin(2 * t));   // rows: y squashed by 0.5
+        return {u * z / K1, -2 * v * z / K1, z};   // -2: rows go DOWN, and y was squashed by 0.5
+    }
+
+    // How far from the middle (in cells) the donut's centre can be, with the whole donut still on
+    // screen, when it is z away and the screen edge is 'edge' cells out. It is easiest in ANGLES, as
+    // seen from the camera (which flies with lens kFlyZoom, so the donut is really z*kFlyZoom away):
+    //   the edge is at angle E, where tan E = edge / K1           (K1: cells per unit of x/z)
+    //   the donut is a ball of radius kOuter, d away; it covers angle B either side of its centre,
+    //   where sin B = kOuter / d  (the lines of sight that just touch the ball)
+    // so the centre can be at most E - B off to the side, and tan(E - B) = (tanE - tanB) / (1 + tanE tanB).
+    static float room(float edge, float K1, float z) {
+        const float lens = K1 * kFlyZoom, d = z * kFlyZoom;
+        const float tanE = edge / lens;
+        const float tanB = kOuter / std::sqrt(d * d - kOuter * kOuter);
+        return std::max(0.0f, lens * (tanE - tanB) / (1 + tanE * tanB));
+    }
+
+    // The trail: a dot wherever the centre has been, older dots dimmer. The dots go through the same
+    // z-buffer test as the donut, so the donut hides the ones behind it, and you can see the newest
+    // ones through its hole (the centre of a donut is in the middle of the hole).
+    void drawTrail(Canvas& cv, float K1, float zoom) {
+        const Color bright = colour_ ? Color{215, 120, 55} : Color{190, 190, 190};
+        const int n = int(trail_.size());
+        for (int i = 0; i < n; ++i) {
+            const Vec3& p = trail_[i];   // in "zoom 1" units, so K1 is the zoom-1 one
+            const int sx = int(w_ / 2.0f + K1 * p.x / p.z);
+            const int sy = int(h_ / 2.0f - K1 * p.y / p.z * 0.5f);
+            if (sx < 0 || sx >= w_ || sy < 0 || sy >= h_) continue;
+            if (1 / (p.z * zoom) <= zbuf_[sy * w_ + sx]) continue;   // part of the donut is in front of this dot
+            const float newness = float(i + 1) / n;     // ~0 = oldest .. 1 = newest
+            const float level = std::round(newness * fog(p.z) * 10) / 10;   // few levels, few colour codes
+            cv.set(sx, sy, '.', lerp(Color{0, 0, 0}, bright, level));
+        }
+    }
+
     int w_ = 0, h_ = 0;
     std::vector<float> zbuf_;   // 1/z of the nearest point drawn in each cell (0 = nothing yet)
     std::vector<Rotation> phiTable_;
@@ -142,6 +268,12 @@ private:
     double speed_ = 1.0;
     bool colour_ = true;
     Color warm_[kNumShades], plain_[kNumShades];
+
+    bool flying_ = true;       // what M switches. fly_ follows it smoothly:
+    double fly_ = 0;           // 0 = spinning in place .. 1 = flying (so it glides out at the start)
+    double flightT_ = 0;       // where along the figure-8 we are (0..2*pi)
+    bool showTrail_ = true;
+    std::deque<Vec3> trail_;   // recent centre positions, oldest first
 };
 
 }  // namespace

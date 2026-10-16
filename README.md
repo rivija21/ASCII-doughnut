@@ -1,10 +1,10 @@
 # ASCII Sims
 
-Four animations drawn with plain text characters in the Windows terminal, written in C++17:
+Four animations drawn with plain text characters in a terminal, on **macOS** or **Windows**, written in C++17:
 
 | # | Simulation | What you see | Main idea it teaches |
 |---|---|---|---|
-| 1 | **Spinning 3D donut** | A shaded torus tumbling in 3D | 3D rotation, perspective projection, z-buffer, lighting |
+| 1 | **Flying 3D donut** | A shaded torus tumbling and swooping round a figure-8 through 3D space | 3D rotation, perspective projection, z-buffer, lighting, un-projection |
 | 2 | **Matrix digital rain** | Green streams of falling characters | Particles, fading trails, colour |
 | 3 | **Doom fire** | Flames rising from the bottom | Cellular automaton, fixed time step, palettes |
 | 4 | **Double pendulum** | A chaotic pendulum with a glowing trail | Differential equations, RK4 integration, chaos |
@@ -15,6 +15,31 @@ so you can come back later and understand every line.
 ---
 
 ## 1. Build and run
+
+### macOS
+
+The easy way: **double-click `Run ASCII Sims.command`** in Finder. It opens Terminal, builds the
+program the first time (and again whenever you change the code), makes the window 140 × 44
+characters and starts it.
+
+Or by hand, in Terminal, from the project folder:
+
+```bash
+./build.sh
+./ascii-sims
+```
+
+`build.sh` uses `c++` (Apple's clang). It comes with Xcode or the Command Line Tools; if neither is
+installed, macOS offers to install the tools the first time you run it. The command it runs:
+
+```bash
+c++ -std=c++17 -O2 -Wall -Wextra -arch arm64 -arch x86_64 src/main.cpp src/terminal.cpp src/platform_mac.cpp src/donut.cpp src/matrix.cpp src/fire.cpp src/pendulum.cpp -o ascii-sims
+```
+
+`-arch arm64 -arch x86_64` builds a **universal** program: one file that runs on Apple-chip and
+Intel Macs. Any Mac terminal works: Terminal, iTerm2, Ghostty, the VS Code terminal...
+
+### Windows
 
 You need `g++` from MSYS2 (you already have it in `C:\msys64\ucrt64\bin`).
 
@@ -28,7 +53,7 @@ From the project folder:
 `build.bat` runs this command, which you can also type yourself:
 
 ```powershell
-g++ -std=c++17 -O2 -Wall -Wextra src\main.cpp src\terminal.cpp src\donut.cpp src\matrix.cpp src\fire.cpp src\pendulum.cpp -o ascii-sims.exe -static -lwinmm
+g++ -std=c++17 -O2 -Wall -Wextra src\main.cpp src\terminal.cpp src\platform_windows.cpp src\donut.cpp src\matrix.cpp src\fire.cpp src\pendulum.cpp -o ascii-sims.exe -static -lwinmm
 ```
 
 | Flag | Meaning |
@@ -42,7 +67,8 @@ g++ -std=c++17 -O2 -Wall -Wextra src\main.cpp src\terminal.cpp src\donut.cpp src
 **Where to run it:** Windows Terminal, PowerShell or cmd. Git Bash's own window (mintty) is not a
 real Windows console. Either run `winpty ./ascii-sims.exe` there, or use one of the others.
 
-**Tip:** maximise the window, or zoom out with `Ctrl` + `-`. More cells means more detail.
+**Tip (both systems):** make the window bigger, or the text smaller (`Cmd` + `-` on a Mac,
+`Ctrl` + `-` on Windows). More cells means more detail.
 
 ## 2. Controls
 
@@ -52,7 +78,9 @@ real Windows console. Either run `winpty ./ascii-sims.exe` there, or use one of 
 | Menu | `Q` / `Esc` | Quit |
 | Any simulation | `P` | Pause / resume |
 | Any simulation | `Q` / `Esc` | Back to the menu |
-| Donut | `+` / `-` | Spin faster / slower |
+| Donut | `M` | Fly round the figure-8 ↔ spin in place (it glides between the two) |
+| Donut | `T` | Trail on / off (the dotted path behind the flying donut) |
+| Donut | `+` / `-` | Spin and fly faster / slower |
 | Donut | `C` | Colour on / off |
 | Matrix | `+` / `-` | Rain faster / slower |
 | Matrix | `C` | Next colour theme (green, cyan, amber, pink) |
@@ -69,21 +97,29 @@ real Windows console. Either run `winpty ./ascii-sims.exe` there, or use one of 
 ## 3. How the program is organised
 
 ```
-doughnut/
-├── build.bat            one-click build
-├── README.md            this file
+ASCII-doughnut/
+├── build.sh                 macOS build
+├── Run ASCII Sims.command   macOS: double-click to build and run
+├── build.bat                Windows build
+├── README.md                this file
 └── src/
-    ├── sim.h            the Simulation interface every animation implements, plus a Random helper
-    ├── main.cpp         the menu and the game loop (runSimulation)
-    ├── terminal.h/.cpp  Canvas (frame buffer), colours, keyboard, timing; the ONLY Windows-specific code
-    ├── donut.cpp        simulation 1
-    ├── matrix.cpp       simulation 2
-    ├── fire.cpp         simulation 3
-    └── pendulum.cpp     simulation 4
+    ├── sim.h                the Simulation interface every animation implements, plus a Random helper
+    ├── main.cpp             the menu and the game loop (runSimulation)
+    ├── terminal.h/.cpp      Canvas (frame buffer), colours, timing: the same on every system
+    ├── platform.h           the few things terminal.cpp needs from the operating system
+    ├── platform_mac.cpp     ...for macOS: keyboard (termios), window size, signals
+    ├── platform_windows.cpp ...for Windows: the ONLY file that includes <windows.h>
+    ├── donut.cpp            simulation 1
+    ├── matrix.cpp           simulation 2
+    ├── fire.cpp             simulation 3
+    └── pendulum.cpp         simulation 4
 ```
 
+Each build script compiles exactly one of the two `platform_*.cpp` files. Everything else is
+identical on both systems.
+
 **Suggested reading order:** `sim.h` → `main.cpp` → `terminal.h` → `matrix.cpp` (the simplest) →
-`fire.cpp` → `donut.cpp` → `pendulum.cpp` → `terminal.cpp` (the low-level details).
+`fire.cpp` → `donut.cpp` → `pendulum.cpp` → `terminal.cpp` → `platform_mac.cpp` (the low-level details).
 
 ### 3.1 The big picture
 
@@ -180,7 +216,12 @@ The terminal treats them as commands instead of printing them:
 | `ESC[?2026h` / `ESC[?2026l` | Begin / end a "synchronised update" (terminals that don't know it ignore it) |
 
 Windows only understands these after `SetConsoleMode(..., ENABLE_VIRTUAL_TERMINAL_PROCESSING)`, which
-`term::init()` turns on.
+`term::init()` in `platform_windows.cpp` turns on. Mac terminals understand them out of the box.
+
+**Older terminals and 256 colours.** Apple's Terminal only learned "true colour" in macOS 26. On older
+Macs `platform_mac.cpp` notices (from the `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` environment
+variables) and `present()` sends `ESC[38;5;nm` instead: colour number `n` from a fixed palette of 256,
+a 6×6×6 colour cube plus 24 greys. `nearest256()` in `terminal.cpp` picks the closest one.
 
 **Small optimisations in `present()`:**
 - A colour code is sent only when the colour *changes*, and never for spaces (they're invisible).
@@ -198,13 +239,45 @@ the same as in your `snake.cpp`. Arrow keys arrive as two codes: `224` (or `0`) 
 
 **Timing.** `FrameClock::tick()` sleeps until the next frame is due. Windows' `Sleep()` normally
 wakes only every ~15.6 ms, so asking for a 10 ms sleep can actually take 15.6 ms and frames
-stutter. `timeBeginPeriod(1)` asks for 1 ms precision while the program runs.
+stutter. `timeBeginPeriod(1)` asks for 1 ms precision while the program runs. (macOS sleeps
+precisely already, so `platform_mac.cpp` just calls `std::this_thread::sleep_for`.)
+
+### 3.6 The macOS layer ([src/platform_mac.cpp](src/platform_mac.cpp))
+
+The Mac version needs the same four things as the Windows one, from different system calls:
+
+| Job | Windows | macOS |
+|---|---|---|
+| Write a frame | `WriteFile` | `write()`, in a loop: a big frame may go out in pieces |
+| Window size | `GetConsoleScreenBufferInfo` | `ioctl(STDOUT_FILENO, TIOCGWINSZ, ...)` |
+| Read keys without waiting | `_kbhit()` + `_getch()` | **raw mode** with `termios`, then `read()` |
+| Clean up on Ctrl+C | `SetConsoleCtrlHandler` | **signal handlers** (`signal(SIGINT, ...)`) |
+
+**Raw mode.** A terminal normally works line by line ("canonical mode"): it shows what you type, lets
+you edit it, and only gives the line to the program when you press Return. `tcgetattr()` reads the
+terminal's settings and `tcsetattr()` changes them. We turn off `ICANON` (line by line) and `ECHO`
+(showing keys), and set `VMIN = 0, VTIME = 0`, which makes `read()` return straight away with
+nothing when no key is waiting. The original settings are saved and put back at the end.
+
+**Arrow keys are escape codes too.** Up arrives as three bytes, `ESC [ A` (Down `B`, Right `C`,
+Left `D`). So when `readKey()` sees an ESC, it waits up to 20 ms (`poll()`) for more bytes. If none
+come, it was the Esc key itself.
+
+**Signals.** macOS tells a program about Ctrl+C by sending it a *signal* (`SIGINT`), and about a
+closed window with `SIGHUP`. A signal handler runs in the middle of whatever the program was doing,
+even halfway through allocating memory, so it may only call "async-signal-safe" functions like
+`write()` and `tcsetattr()`, not `printf` or anything that uses `std::string`. That's why the
+restore codes are plain `const char` arrays. **Ctrl+Z** (`SIGTSTP`) pauses the program and returns
+you to the shell: the handler gives the shell a normal terminal back, stops, and when you type `fg`
+it switches back into animation mode.
 
 ---
 
-## 4. Simulation 1: the spinning donut ([src/donut.cpp](src/donut.cpp))
+## 4. Simulation 1: the flying donut ([src/donut.cpp](src/donut.cpp))
 
-Based on Andy Sloane's famous `donut.c` (2006). Steps to draw one frame:
+Based on Andy Sloane's famous `donut.c` (2006). Press `M` to make it spin in place exactly like the
+original (a test checked that this mode draws the same characters as before, frame for frame).
+Sections 4.1–4.6 explain the classic spinning donut; 4.7 explains how it flies. Steps to draw one frame:
 
 ### 4.1 Build a torus out of points
 
@@ -240,8 +313,9 @@ z' = y·sin A + z·cos A                                | 0  cos A  −sin A  |
 ```
 
 Each point is rotated around **Y by φ** (to build the donut), then around **X by A**, then
-around **Z by B** (to tumble it). `A` and `B` grow over time at different speeds (1.2 and 0.6 rad/s),
-so the motion never repeats exactly. The **normal** gets the same rotations, because it's attached
+around **Z by B** (to tumble it), and finally **moved** by adding the donut's centre `c`
+(`c = (0, 0, K2)` when it spins in place, somewhere on the figure-8 when it flies). `A` and `B` grow over time at different speeds (1.2 and 0.6 rad/s),
+so the tumble only repeats every 10.5 s (2π / 0.6), when `B` has turned once and `A` twice. The **normal** gets the same rotations, because it's attached
 to the surface.
 
 `Rotation` stores `cos` and `sin` together, because computing them is slow compared to `+` and `*`.
@@ -250,7 +324,7 @@ The `φ` values are the same for every `θ`, so their cos/sin are computed once 
 
 ### 4.3 Project it onto the screen (perspective)
 
-The viewer's eye is at the origin looking along +z, and the donut is pushed `K2 = 5` units away.
+The viewer's eye is at the origin looking along +z, and the spinning donut is pushed `K2 = 5` units away.
 By similar triangles, a point at `(x, y, z)` appears on the screen at:
 
 ```
@@ -307,6 +381,69 @@ phiStep   = min(0.02, 0.9 · zNearest / (K1 · (R1 + R2)));   // around the donu
 **Lesson:** when you sample a continuous surface, the samples must be denser than the pixels where
 the surface looks biggest. A test that counted dark cells with bright cells on both sides found
 395 such holes in 600 frames at 100×29 (15,346 at 210×55), and 0 after the fix.
+
+The flying donut uses the same rule, but with its **current** nearest point, `zNearest = c.z − R1 − R2`.
+Far away, fewer points are needed, so flying is actually cheaper than spinning close up.
+
+### 4.7 Flying: a figure-8 through 3D space
+
+**The path.** Choosing a 3D path directly makes it hard to keep the donut on screen, so the path is
+designed in two parts and then turned into 3D:
+
+```
+depth    z(t) = 10 − 4·cos 2t          6 (near) when crossing the middle of the 8, 14 (far) at the loop ends
+screen   u(t) = roomX(z) · sin t       columns right of the window's centre
+         v(t) = roomY(z) · sin 2t      rows below it
+```
+
+`v` goes round twice while `u` goes round once, and that draws an 8 (a **Lissajous curve**). `t`
+goes from 0 to 2π every 12 seconds. The donut comes towards you every time it crosses the middle
+and flies off into the distance at the ends of the loops.
+
+**Un-projecting.** To find the 3D centre that lands on screen at `(u, v)`, run the projection of §4.3
+backwards:
+
+```
+sx = w/2 + K1 · x / z      ⇒      x =  u · z / K1
+sy = h/2 − K1 · y / z · ½  ⇒      y = −2 · v · z / K1
+```
+
+**How much room?** (`room()` in the code) Think in **angles**, as seen from the eye. The edge of the
+screen is at angle `E` off to the side, where `tan E = edge / K1`. The whole donut fits in a ball of
+radius `R1 + R2`; a ball of radius `r` at distance `d` covers an angle `B` either side of its centre,
+with `sin B = r / d` (the lines of sight that just touch it). So the centre can be at most
+`E − B` off to the side, and the subtraction formula for tangents gives it in cells:
+
+```
+tan(E − B) = (tan E − tan B) / (1 + tan E · tan B)
+```
+
+A far-away donut looks smaller (`B` is smaller), so it can go closer to the edge. That's why `room`
+depends on `z`.
+
+**A longer lens for flying.** The original camera is very close (`K2 = 5`) and its view is very wide
+(about 108° across a 100-column window), like a phone's 0.5× lens. Wide-angle pictures stretch things
+near their edges: the first flying version had a donut 1.8 times too wide at the ends of the loops.
+So when flying, the camera moves 2.5 times further back (`kFlyZoom`) **and** zooms in 2.5 times:
+`K1` and every distance are multiplied by the same number, so the donut looks just as big, but the
+view is narrower and the stretching goes away. Doing both at once while it glides out is the
+**dolly zoom** that film-makers use (Hitchcock's *Vertigo*): look closely and the donut's perspective
+flattens a little while its size stays the same.
+
+**Gliding, not jumping.** `fly_` moves from 0 to 1 (or back) over 1.5 s when you press `M`, and the
+centre is `mix(still, onTheFigure8, smoothstep(fly_))`. `smoothstep(t) = t²(3 − 2t)` goes from 0 to 1
+like `t`, but starts and ends with zero speed, so the donut eases out and in instead of lurching.
+
+**Fog.** Light crossing hazy air loses the same *fraction* of itself for every metre it travels, so
+what reaches you falls off exponentially: `brightness = e^(−0.06·(z − 5))` (the **Beer–Lambert law**).
+At the far end of the loops (z = 14) the donut's colours are at about 58%.
+
+**The trail** is the last 75 centre positions (2.5 s), drawn as `.` dots that fade with age. The dots
+are tested against the donut's z-buffer, so the donut hides the dots behind it, and you can see the
+newest ones through the hole: the centre of a donut is in the middle of its hole.
+
+**The numbers at the top** show the depth `z` and how big the donut looks compared with `z = 5`:
+apparent size is proportional to `1 / z`, so at `z = 10` it looks half as big.
 
 ---
 
@@ -490,8 +627,10 @@ The twin isn't a numerical error either: RK4 is accurate here, and the physics i
 | Lambdas | `toScreen`, `mix`, `randomAngle` | Small local helper functions |
 | `constexpr`, `sizeof(str) − 1` | constants at the top of each file | Compile-time constants; string length without the `'\0'` |
 | `std::initializer_list` | `gradient({c1, c2, c3}, t)` | Pass a list of colours in braces |
-| `std::deque` | pendulum trail | Cheap add at the back, remove at the front |
-| `std::atomic<bool>` | `active` in `terminal.cpp` | The Ctrl+C handler runs on another thread |
+| `std::deque` | pendulum and donut trails | Cheap add at the back, remove at the front |
+| `std::atomic<bool>` | `active` in `platform_*.cpp` | The Ctrl+C handler interrupts the main code (another thread on Windows, a signal on macOS) |
+| Signal handlers | `onQuitSignal`, `onSuspend` in `platform_mac.cpp` | Restore the terminal on Ctrl+C / Ctrl+Z |
+| `static` member function | `Donut::room()` | A helper that belongs to the class but needs no object |
 | Raw string literals `R"( ... )"` | the title in `main.cpp` | Backslashes in ASCII art without escaping them |
 | `<random>` (`std::mt19937`) | `Random` in `sim.h` | Better random numbers than `rand()` |
 | `<chrono>` | `FrameClock` | Precise time measurement |
@@ -506,6 +645,12 @@ const Rotation rotA{float(angleA_)};   // ✓ braces always mean "make an object
 The first line can be read as "a function `rotA` taking a `float` parameter named `angleA_`", and
 C++ rules say that reading wins. g++ warned (`-Wvexing-parse`) and then failed to compile. When
 in doubt, initialise with braces `{}`.
+
+**Another one, found while adding the flight: name hiding.** `donut.cpp` first had its own
+`Vec3 lerp(Vec3, Vec3, float)` next to the `Color lerp(Color, Color, float)` from `terminal.h`.
+Then `lerp({90, 90, 90}, {255, 255, 255}, t)` stopped compiling: a function declared inside a
+namespace **hides** every function with the same name from outside it, even ones with different
+parameter types, so only the `Vec3` version was considered. Hence the point version is called `mix`.
 
 ---
 
@@ -526,18 +671,23 @@ Start easy and work down the list:
    2. declare `std::unique_ptr<Simulation> makeLife();` in `sim.h`;
    3. add `{'5', "Game of Life", "...", makeLife}` to `kItems` in `main.cpp`;
    4. add `src\life.cpp` to `build.bat`.
-7. **Port to Linux/macOS:** only `terminal.cpp` needs rewriting. Use `ioctl(TIOCGWINSZ)` for the size,
-   `termios` raw mode plus `read()` for keys, `write()` for output and `nanosleep` for timing.
-   Everything else is standard C++.
+7. **Donut flight:** in `flightCentre()`, change `sin(2 * t)` to `sin(3 * t)` (a different Lissajous
+   figure), or make `z(t)` use `sin(t)` instead of `cos(2t)` so one loop is near and the other far. Set `kFlyZoom` to 1
+   to see the wide-angle stretching for yourself, and `kFogDensity` to 0.2 for thick fog.
+8. **Port to Linux:** `platform_mac.cpp` only uses POSIX calls (`termios`, `ioctl`, `poll`, signals),
+   which Linux has too. Try building it there with `g++` instead of `c++`, without the `-arch` flags.
 
 ## 10. Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| You see text like `←[38;2;255;…` | The console doesn't understand ANSI codes. Use Windows Terminal. |
-| "Not running in a Windows console" | You started it from Git Bash (mintty) or redirected its output. Use Windows Terminal / PowerShell / cmd, or `winpty ./ascii-sims.exe`. |
+| Mac: `permission denied: ./build.sh` | Run `chmod +x build.sh "Run ASCII Sims.command"` once. |
+| Mac: "Not running in a terminal" | Start it from Terminal (or double-click `Run ASCII Sims.command`), not from another app. |
+| Mac: `xcrun: error: invalid active developer path` | Run `xcode-select --install` to get the compiler. |
+| Windows: you see text like `←[38;2;255;…` | The console doesn't understand ANSI codes. Use Windows Terminal. |
+| Windows: "Not running in a Windows console" | You started it from Git Bash (mintty) or redirected its output. Use Windows Terminal / PowerShell / cmd, or `winpty ./ascii-sims.exe`. |
 | Low fps or stutter on a huge window | Zoom in (`Ctrl` + `+`) for fewer cells. The old console (conhost) is slower than Windows Terminal. |
-| `g++` not found | Add `C:\msys64\ucrt64\bin` to your `PATH`. |
+| Windows: `g++` not found | Add `C:\msys64\ucrt64\bin` to your `PATH`. |
 | The terminal looks broken after a crash (no cursor, odd screen) | Close and reopen the tab. Normally the Ctrl+C handler prevents this. |
 
 ## 11. Further reading

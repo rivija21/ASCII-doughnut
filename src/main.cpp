@@ -1,8 +1,6 @@
 // main.cpp - The menu, plus the animation loop shared by every simulation.
 //
-// Build (from the project folder), or just run build.bat:
-//   g++ -std=c++17 -O2 -Wall src/main.cpp src/terminal.cpp src/donut.cpp src/matrix.cpp
-//       src/fire.cpp src/pendulum.cpp -o ascii-sims.exe -static -lwinmm
+// Build from the project folder with build.bat (Windows) or ./build.sh (macOS).
 
 #include "sim.h"
 
@@ -36,7 +34,7 @@ struct MenuItem {
 };
 
 const MenuItem kItems[] = {
-    {'1', "Spinning 3D donut", "3D rotation, perspective, z-buffer, lighting", makeDonut},
+    {'1', "Flying 3D donut", "3D rotation, perspective, z-buffer, lighting", makeDonut},
     {'2', "Matrix digital rain", "particles, fading trails, colour themes", makeMatrix},
     {'3', "Doom fire", "cellular automaton, fixed time step, palettes", makeFire},
     {'4', "Double pendulum", "physics, RK4 integration, chaos", makePendulum},
@@ -153,7 +151,7 @@ const MenuItem* menu() {
         cv.text(listX, y, "[Q]", Color{255, 200, 60});
         cv.text(listX + 5, y, "Quit", kWhite);
         y += 2;
-        cv.text(listX, y, "Tip: maximise the window, or zoom out with Ctrl and -, for more detail.", kGrey);
+        cv.text(listX, y, "Tip: make the window bigger, or the text smaller, for more detail.", kGrey);
 
         cv.present();
         time += clock.tick();
