@@ -4,7 +4,7 @@ Four animations drawn with plain text characters in a terminal, on **macOS** or 
 
 | # | Simulation | What you see | Main idea it teaches |
 |---|---|---|---|
-| 1 | **Flying 3D donut** | A shaded torus tumbling and swooping round a figure-8 through 3D space | 3D rotation, perspective projection, z-buffer, lighting, un-projection |
+| 1 | **Flying 3D donut** | A shaded torus tumbling and swooping round a figure-8 through 3D space, popping with ripples as it passes | 3D rotation, perspective projection, z-buffer, lighting, un-projection, damped springs |
 | 2 | **Matrix digital rain** | Green streams of falling characters | Particles, fading trails, colour |
 | 3 | **Doom fire** | Flames rising from the bottom | Cellular automaton, fixed time step, palettes |
 | 4 | **Double pendulum** | A chaotic pendulum with a glowing trail | Differential equations, RK4 integration, chaos |
@@ -80,6 +80,7 @@ real Windows console. Either run `winpty ./ascii-sims.exe` there, or use one of 
 | Any simulation | `Q` / `Esc` | Back to the menu |
 | Donut | `M` | Fly round the figure-8 ↔ spin in place (it glides between the two) |
 | Donut | `T` | Trail on / off (the dotted path behind the flying donut) |
+| Donut | `Space` | Pulse: the donut pops and sends out ripple rings (it also pulses by itself each time it swoops closest) |
 | Donut | `+` / `-` | Spin and fly faster / slower |
 | Donut | `C` | Colour on / off |
 | Matrix | `+` / `-` | Rain faster / slower |
@@ -445,6 +446,56 @@ newest ones through the hole: the centre of a donut is in the middle of its hole
 **The numbers at the top** show the depth `z` and how big the donut looks compared with `z = 5`:
 apparent size is proportional to `1 / z`, so at `z = 10` it looks half as big.
 
+### 4.8 The pulse: a damped spring and a blast wave
+
+Each time the flying donut swoops through the middle of the 8 (and whenever you press `Space`), it
+**pulses** like a drop hitting water: it pops, and ripple rings spread out from where it was.
+
+**The pop is a damped spring.** The donut's size is `s = 1 + x`, and `x` behaves like a weight on a
+spring with friction:
+
+```
+x'' = −ω0²·x − 2ζ·ω0·x'          ω0 = 17 rad/s (how stiff),  ζ = 0.38 (how much damping)
+```
+
+The spring pulls `x` back to 0 (normal size) and the damping takes energy out. A pulse is a sudden
+kick to the speed, `x' += 6.9`, like flicking the weight. What happens next depends on `ζ`, the
+**damping ratio**: with `ζ = 0` it would wobble for ever, with `ζ ≥ 1` it would creep back without
+overshooting, and in between it bounces. Each overshoot is `e^(−πζ/√(1−ζ²)) = 0.28` times the one
+before, which gives the "natural" pop: **1.25× after 75 ms, back down to 0.93× at 274 ms, and within
+1% of normal by 541 ms**. That springy overshoot is what makes UI animations on phones feel physical.
+
+The spring is stepped like the pendulum, in fixed 1 ms steps (§3.4), with **semi-implicit Euler**:
+
+```cpp
+swellV_ += (-kSpringW0 * kSpringW0 * swell_ - 2 * kSpringZeta * kSpringW0 * swellV_) * h;   // speed first...
+swell_  += swellV_ * h;                                                                       // ...then move with the NEW speed
+```
+
+Plain Euler (§7.3) would work out both lines from the *old* values, moving with the speed from
+before this step. For an oscillator that slowly pumps energy in: with no damping, its wobble would
+grow by about 15% every second here. Using the new speed to move is just as cheap and doesn't.
+
+A swollen donut is closer to you at its nearest point, so the sampling steps of §4.6 use the swollen
+size, `zNearest = c.z − (R1 + R2)·s`. A test that compares frames against a much denser rendering
+found no new sampling holes, and with no pulse the spin-in-place mode still draws exactly what the
+original program did.
+
+**The rings grow like a blast wave.** A sudden burst of energy spreading into its surroundings slows
+down as it sweeps up more of them; for an explosion in open air the shock front's radius grows as
+`r ∝ t^(2/5)` (the Sedov–Taylor blast wave). The rings use the same law:
+
+```
+r(t) = (R1 + R2) · (1.1 + 1.6 · (t / 1.2 s)^0.4)        brightness = (1 − t / 1.2 s)²
+```
+
+`t^0.4` starts infinitely fast and keeps slowing down, so a ring bursts out of the donut and then
+drifts to a stop as it fades. A second, fainter ring follows 0.15 s later, like the second ripple in
+a pond. On screen each ring is an ellipse `rx` columns wide and `rx/2` rows tall (cells are twice as
+tall as wide), drawn as `~`, then `-`, then `.` as it fades. Its dots go through the donut's z-buffer
+like the trail, so the donut hides any part of a ring behind it, and the rings stay where the
+splash happened while the donut flies on.
+
 ---
 
 ## 5. Simulation 2: Matrix rain ([src/matrix.cpp](src/matrix.cpp))
@@ -674,6 +725,9 @@ Start easy and work down the list:
 7. **Donut flight:** in `flightCentre()`, change `sin(2 * t)` to `sin(3 * t)` (a different Lissajous
    figure), or make `z(t)` use `sin(t)` instead of `cos(2t)` so one loop is near and the other far. Set `kFlyZoom` to 1
    to see the wide-angle stretching for yourself, and `kFogDensity` to 0.2 for thick fog.
+   For the pulse, try `kSpringZeta = 0.1` (a jelly that wobbles for a long time) and `1.0` (no bounce
+   at all). Then set it to 0 and turn `stepSpring()` into plain Euler (move with the speed from before
+   the step, e.g. save `const double v = swellV_;` first and use `swell_ += v * h;`): the wobble grows.
 8. **Port to Linux:** `platform_mac.cpp` only uses POSIX calls (`termios`, `ioctl`, `poll`, signals),
    which Linux has too. Try building it there with `g++` instead of `c++`, without the `-arch` flags.
 

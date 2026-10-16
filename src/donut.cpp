@@ -1,5 +1,6 @@
 // donut.cpp - The famous spinning ASCII donut (after Andy Sloane's donut.c, 2006), which can
-//             also FLY: it swoops around a figure-8 through 3D space, towards you and away.
+//             also FLY: it swoops around a figure-8 through 3D space, towards you and away,
+//             and PULSE: it pops like a drop hitting water and sends out ripple rings.
 //
 // The idea in one sentence: sample thousands of points on the surface of a torus, rotate
 // them in 3D, move them to wherever the donut is, project them onto the 2D terminal, keep only
@@ -35,6 +36,17 @@ constexpr float kFlyZoom = 2.5f;                // flying uses a longer camera l
 constexpr double kGlideSeconds = 1.5;           // time to glide between spinning in place and flying
 constexpr int kTrailLen = 75;                   // remembered centre positions, one per frame (2.5 s)
 
+// The pulse (see pulse() below): a springy pop plus ripple rings.
+constexpr double kSpringW0 = 17.0;     // the spring's natural frequency, radians per second
+constexpr double kSpringZeta = 0.38;   // damping ratio: 0 wobbles for ever, 1 creeps back, between them it bounces
+constexpr double kKick = 6.9;          // how hard a pulse kicks the swell (per second): it peaks at 1.25x
+constexpr double kSpringStep = 0.001;  // the spring moves in fixed steps of 1 ms
+constexpr float kMaxSwell = 1.4f;      // never draw the donut bigger than this, however often you press Space
+constexpr double kRingSeconds = 1.2;   // how long a ripple ring lasts
+constexpr float kRingReach = 1.6f;     // how far a ring spreads, in donut radii
+constexpr double kEchoDelay = 0.15;    // a second, fainter ring follows the first this much later
+constexpr int kMaxRings = 8;
+
 // ---- a tiny bit of 3D maths ------------------------------------------------
 
 struct Vec3 {
@@ -42,6 +54,7 @@ struct Vec3 {
 };
 
 Vec3 operator+(Vec3 a, Vec3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+Vec3 operator*(float k, Vec3 v) { return {k * v.x, k * v.y, k * v.z}; }
 // lerp() for points. (Another overload called lerp would hide the Color one from terminal.h.)
 Vec3 mix(Vec3 a, Vec3 b, float t) { return {a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t}; }
 
@@ -80,7 +93,7 @@ public:
     }
 
     const char* name() const override { return flying_ ? "Flying Donut" : "Spinning Donut"; }
-    const char* help() const override { return "M fly/spin  T trail  +/- speed  C colour"; }
+    const char* help() const override { return "M fly/spin  T trail  Space pulse  +/- speed  C colour"; }
 
     void resize(int w, int h) override {
         w_ = w;
@@ -95,6 +108,7 @@ public:
         if (key == 'c') colour_ = !colour_;
         if (key == 'm') flying_ = !flying_;
         if (key == 't') showTrail_ = !showTrail_;
+        if (key == ' ') pulse();
     }
 
     void update(double dt) override {
@@ -104,7 +118,24 @@ public:
         angleB_ += 0.6 * speed_ * dt;   // radians per second around the Z axis
 
         // Move along the figure-8: t goes once round from 0 to 2*pi every kLoopSeconds.
+        const double before = flightT_;
         flightT_ = std::fmod(flightT_ + kTwoPi / kLoopSeconds * speed_ * dt, double(kTwoPi));
+
+        // Pulse by itself each time the flying donut swoops through the middle of the 8, closest to
+        // you: that's where t passes pi, or wraps round from 2*pi back to 0.
+        const bool crossedMiddle = flightT_ < before || (before < kTwoPi / 2 && flightT_ >= kTwoPi / 2);
+        if (crossedMiddle && fly_ >= 1) pulse();
+
+        // The pulse's spring moves in real time (not sped up by +/-), in fixed 1 ms steps.
+        springLeft_ += dt;
+        while (springLeft_ >= kSpringStep) {
+            springLeft_ -= kSpringStep;
+            stepSpring(kSpringStep);
+        }
+        for (Ring& r : rings_) r.age += dt;
+        rings_.erase(std::remove_if(rings_.begin(), rings_.end(),
+                                    [](const Ring& r) { return r.age >= kRingSeconds + kEchoDelay; }),
+                     rings_.end());
 
         // Glide between spinning in place (fly_ = 0) and flying (fly_ = 1) instead of jumping.
         const double glide = dt / kGlideSeconds;
@@ -123,12 +154,15 @@ public:
         const Vec3 seen = centre();                     // where the donut appears, in "zoom 1" units
         const Vec3 c{seen.x, seen.y, seen.z * zoom};    // where it really is
 
+        // A pulse makes the donut swell: every point moves away from the centre by the factor s.
+        const float s = std::clamp(1 + float(swell_), 0.7f, kMaxSwell);
+
         // How far apart to sample points. Neighbouring points must land less than one cell apart on
         // screen, even on the part of the donut nearest the viewer (z = c.z - R1 - R2, where it looks
         // biggest). Otherwise some cells get skipped and the back of the donut shows through the gaps.
-        const float zNearest = c.z - kOuter;
-        const float thetaStep = std::min(0.07f, 0.9f * zNearest / (K1 * R1));      // around the tube
-        const float phiStep = std::min(0.02f, 0.9f * zNearest / (K1 * kOuter));    // around the donut
+        const float zNearest = c.z - kOuter * s;
+        const float thetaStep = std::min(0.07f, 0.9f * zNearest / (K1 * R1 * s));      // around the tube
+        const float phiStep = std::min(0.02f, 0.9f * zNearest / (K1 * kOuter * s));    // around the donut
 
         // phi takes the same values for every theta, so compute their cos/sin once per frame, not
         // once per point. (Trig functions are slow compared to + and *.)
@@ -154,9 +188,9 @@ public:
 
             // ...and phi spins that small circle around the Y axis, sweeping out the whole donut.
             for (const Rotation& p : phiTable_) {
-                // Build the donut (rotate by phi), tumble it (rotate by A, then by B), then move it to
-                // where it is. The normal is a direction, not a place: it turns but doesn't move.
-                const Vec3 point = rotateZ(rotateX(rotateY(circlePoint, p), rotA), rotB) + c;
+                // Build the donut (rotate by phi), tumble it (rotate by A, then by B), swell it by s, then
+                // move it to where it is. The normal is a direction, not a place: it only turns.
+                const Vec3 point = s * rotateZ(rotateX(rotateY(circlePoint, p), rotA), rotB) + c;
                 const Vec3 normal = rotateZ(rotateX(rotateY(circleNormal, p), rotA), rotB);
 
                 // Perspective projection: things further away (bigger z) look smaller.
@@ -180,6 +214,10 @@ public:
         }
 
         if (showTrail_) drawTrail(cv, focal(), zoom);
+        for (const Ring& r : rings_) {
+            drawRing(cv, focal(), zoom, r.at, r.age, 1.0f);
+            drawRing(cv, focal(), zoom, r.at, r.age - kEchoDelay, 0.55f);   // the fainter echo
+        }
         if (flying_) {
             char info[96];
             std::snprintf(info, sizeof info, " flying   depth z = %4.1f   looks %3d%% as big as at z = %g", seen.z,
@@ -261,6 +299,51 @@ private:
         }
     }
 
+    // A pulse, like a drop hitting water: the donut pops (a kick to its spring) and two ripple rings
+    // start spreading from where it is. The rings stay there while the donut flies on.
+    void pulse() {
+        swellV_ = std::max(swellV_, 0.0) + kKick;   // a new kick always pops OUT, even mid-wobble
+        rings_.push_back({centre(), 0});
+        if (int(rings_.size()) > kMaxRings) rings_.erase(rings_.begin());
+    }
+
+    // The swell s = 1 + x behaves like a weight on a spring with damping:
+    //     x'' = -w0^2 x - 2 zeta w0 x'
+    // The spring pulls it back towards normal size (x = 0) and the damping takes energy out. A pulse
+    // flicks the weight (a sudden kick to x'). With zeta = 0.38 it bounces: 1.25x, then 0.93x, then
+    // it settles. Each overshoot is exp(-pi zeta / sqrt(1 - zeta^2)) = 0.28 times the one before.
+    // This is semi-implicit Euler: change the speed first, then move with the NEW speed. Plain Euler
+    // (see pendulum.cpp) would slowly pump energy into the spring; this order doesn't.
+    void stepSpring(double h) {
+        swellV_ += (-kSpringW0 * kSpringW0 * swell_ - 2 * kSpringZeta * kSpringW0 * swellV_) * h;
+        swell_ += swellV_ * h;
+    }
+
+    // A ripple ring: a circle around the spot where a pulse happened, facing the camera. It grows like
+    // a blast wave, radius ~ t^(2/5): very fast at first, slower and slower as it spreads, and fades.
+    // Its dots go through the z-buffer test, so the donut hides any part of a ring behind it.
+    void drawRing(Canvas& cv, float K1, float zoom, Vec3 at, double age, float strength) {
+        if (age < 0 || age >= kRingSeconds) return;
+        const float u = float(age / kRingSeconds);   // 0 = just born .. 1 = gone
+        const float radius = kOuter * (1.1f + kRingReach * std::pow(u, 0.4f));   // in 3D units
+        const float fade = (1 - u) * (1 - u) * strength * fog(at.z);
+        const char ch = fade > 0.45f ? '~' : fade > 0.2f ? '-' : '.';   // the ring thins as it fades
+        const Color bright = colour_ ? Color{255, 215, 150} : Color{235, 235, 235};
+        const Color col = lerp(Color{0, 0, 0}, bright, std::round(fade * 10) / 10);
+        // On screen it is an ellipse, rx columns wide and rx/2 rows tall (cells are twice as tall).
+        const float cx = w_ / 2.0f + K1 * at.x / at.z, cy = h_ / 2.0f - K1 * at.y / at.z * 0.5f;
+        const float rx = K1 * radius / at.z;
+        const float ooz = 1 / (at.z * zoom);
+        const int steps = int(kTwoPi * rx / 0.7f) + 8;   // dots about 0.7 of a column apart: no gaps
+        for (int i = 0; i < steps; ++i) {
+            const float a = kTwoPi * i / steps;
+            const int sx = int(cx + rx * std::cos(a)), sy = int(cy - rx * 0.5f * std::sin(a));
+            if (sx < 0 || sx >= w_ || sy < 0 || sy >= h_) continue;
+            if (ooz <= zbuf_[sy * w_ + sx]) continue;   // part of the donut is in front
+            cv.set(sx, sy, ch, col);
+        }
+    }
+
     int w_ = 0, h_ = 0;
     std::vector<float> zbuf_;   // 1/z of the nearest point drawn in each cell (0 = nothing yet)
     std::vector<Rotation> phiTable_;
@@ -274,6 +357,14 @@ private:
     double flightT_ = 0;       // where along the figure-8 we are (0..2*pi)
     bool showTrail_ = true;
     std::deque<Vec3> trail_;   // recent centre positions, oldest first
+
+    struct Ring {
+        Vec3 at;      // where the pulse happened, in "zoom 1" units like the trail
+        double age;   // seconds since then
+    };
+    std::vector<Ring> rings_;
+    double swell_ = 0, swellV_ = 0;   // the pulse's spring: x (0 = normal size) and its speed x'
+    double springLeft_ = 0;           // time not yet used by a whole 1 ms spring step
 };
 
 }  // namespace
