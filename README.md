@@ -103,6 +103,7 @@ ASCII-doughnut/
 ├── Run ASCII Sims.command   macOS: double-click to build and run
 ├── build.bat                Windows build
 ├── README.md                this file
+├── docs/index.html          an interactive explainer: open it in a browser to play with every simulation
 └── src/
     ├── sim.h                the Simulation interface every animation implements, plus a Random helper
     ├── main.cpp             the menu and the game loop (runSimulation)
