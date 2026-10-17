@@ -142,6 +142,7 @@ figcaption { font-size: 0.92rem; line-height: 1.45; color: var(--muted); margin-
 .term-bar b { color: var(--term-ink); font-weight: 400; }
 .screen { display: block; margin: 0; padding: 10px 12px; font-family: var(--mono); font-size: 12px; line-height: 20px; white-space: pre; overflow: hidden; color: var(--term-ink); background: var(--term); outline: none; cursor: default; font-variant-ligatures: none; }
 .screen:focus-visible { box-shadow: inset 0 0 0 2px var(--term-key); }
+.screen.clickable { cursor: crosshair; touch-action: pan-y; }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.55rem 1.1rem; padding: 0.7rem 0.9rem 0.8rem; background: var(--term-bar); color: var(--term-dim); font: 0.76rem/1.2 var(--mono); }
 .ctl { display: inline-flex; align-items: center; gap: 0.4rem; }
 .key { font: 700 0.76rem/1 var(--mono); color: var(--term-ink); background: var(--term-cap); border: 1px solid var(--term-cap-edge); border-bottom-width: 2px; border-radius: 5px; padding: 0.34rem 0.5rem; min-width: 1.85rem; cursor: pointer; }
@@ -220,31 +221,31 @@ footer h2 { margin-top: 0; font-size: 1.1rem; color: var(--ink); }
 
 <p class="eyebrow">C++17 &middot; macOS and Windows &middot; github.com/rivija21/ASCII-doughnut</p>
 <h1>Inside ASCII&nbsp;Sims</h1>
-<p class="lede">Four animations drawn with nothing but text characters in a terminal: a 3D donut that flies and pops, Matrix rain, Doom fire and a chaotic double pendulum. This guide explains how the C++ is put together, and the maths and physics inside each animation.</p>
+<p class="lede">Five animations drawn with nothing but text characters in a terminal: a 3D donut that flies, Matrix rain, Doom fire, a chaotic double pendulum and a ripple tank you can click. This guide explains how the C++ is put together, and the maths and physics inside each animation.</p>
 <p>Every terminal on this page is live. Each one runs the program&rsquo;s own algorithm, ported line by line from C++ to JavaScript, so you can poke at it here and then find the same lines in the source.</p>
 
 <figure class="term wide" id="hero" aria-label="Live flying donut">
   <div class="term-bar"><span><b data-title>ascii-sims</b></span><span data-dims></span></div>
-  <pre class="screen" tabindex="0" role="img" aria-label="An ASCII donut tumbling and flying around a figure-8 through 3D space, popping with ripple rings each time it passes closest. Focus here and press M, T, Space, plus, minus, C or P to control it."></pre>
+  <pre class="screen" tabindex="0" role="img" aria-label="An ASCII donut tumbling and flying around a figure-8 through 3D space. Focus here and press M, T, plus, minus, C or P to control it."></pre>
   <div class="controls">
     <span class="ctl"><button class="key" type="button" data-key="m">M</button> fly / spin</span>
     <span class="ctl"><button class="key" type="button" data-key="t">T</button> trail</span>
-    <span class="ctl"><button class="key" type="button" data-key=" ">Space</button> pulse</span>
     <span class="ctl"><button class="key" type="button" data-key="+">+</button><button class="key" type="button" data-key="-">&minus;</button> speed</span>
     <span class="ctl"><button class="key" type="button" data-key="c">C</button> colour</span>
     <span class="ctl"><button class="key" type="button" data-key="p">P</button> pause</span>
     <span class="hint">or click the terminal and type</span>
   </div>
 </figure>
-<p class="term-caption">Simulation 1 from the menu, running live. Each time it swoops through the middle of the 8 it pulses like a drop hitting water; Space pulses it whenever you like. M switches between flying and the original spin in place, and the donut glides between the two.</p>
+<p class="term-caption">Simulation 1 from the menu, running live. M switches between flying and the original spin in place; the donut glides between the two.</p>
 
 <nav class="toc" aria-label="Contents">
   <a href="#run"><span>Run it</span><small>Mac and Windows, and every key</small></a>
   <a href="#program"><span>The program</span><small>the loop, time steps, the frame buffer, two operating systems</small></a>
-  <a href="#donut"><span><span class="k">[1]</span>Flying donut</span><small>torus, rotation, projection, z-buffer, light, the flight, the pulse</small></a>
+  <a href="#donut"><span><span class="k">[1]</span>Flying donut</span><small>torus, rotation, projection, z-buffer, light, the flight</small></a>
   <a href="#matrix"><span><span class="k">[2]</span>Matrix rain</span><small>particles and fading trails</small></a>
   <a href="#fire"><span><span class="k">[3]</span>Doom fire</span><small>a cellular automaton</small></a>
   <a href="#pendulum"><span><span class="k">[4]</span>Double pendulum</span><small>Lagrange, RK4 vs Euler, energy, chaos</small></a>
+  <a href="#ripples"><span><span class="k">[5]</span>Ripple tank</span><small>the wave equation, the CFL limit, interference</small></a>
   <a href="#cpp"><span>C++ features</span><small>what&rsquo;s used where, and two gotchas</small></a>
 </nav>
 
@@ -258,12 +259,13 @@ footer h2 { margin-top: 0; font-size: 1.1rem; color: var(--ink); }
 <table>
   <thead><tr><th>Where</th><th>Key</th><th>What it does</th></tr></thead>
   <tbody>
-    <tr><td>Menu</td><td><code>1</code>&ndash;<code>4</code> &middot; <code>Q</code></td><td>Start a simulation &middot; quit</td></tr>
+    <tr><td>Menu</td><td><code>1</code>&ndash;<code>5</code> or click a line &middot; <code>Q</code></td><td>Start a simulation &middot; quit</td></tr>
     <tr><td>Any simulation</td><td><code>P</code> &middot; <code>Q</code> or <code>Esc</code></td><td>Pause and resume &middot; back to the menu</td></tr>
-    <tr><td>[1] Donut</td><td><code>M</code> &middot; <code>T</code> &middot; <code>Space</code> &middot; <code>+</code> <code>-</code> &middot; <code>C</code></td><td>Fly or spin in place &middot; trail &middot; pulse &middot; speed &middot; colour</td></tr>
+    <tr><td>[1] Donut</td><td><code>M</code> &middot; <code>T</code> &middot; <code>+</code> <code>-</code> &middot; <code>C</code></td><td>Fly or spin in place &middot; trail &middot; speed &middot; colour</td></tr>
     <tr><td>[2] Matrix</td><td><code>+</code> <code>-</code> &middot; <code>C</code></td><td>Rain speed &middot; next colour theme</td></tr>
     <tr><td>[3] Fire</td><td><code>Space</code> &middot; <code>&uarr;</code> <code>&darr;</code> &middot; <code>&larr;</code> <code>&rarr;</code></td><td>Fuel on and off &middot; flame height &middot; wind</td></tr>
     <tr><td>[4] Pendulum</td><td><code>R</code> &middot; <code>T</code> &middot; <code>I</code> &middot; <code>+</code> <code>-</code></td><td>New swing &middot; twin &middot; Euler or RK4 &middot; simulation speed</td></tr>
+    <tr><td>[5] Ripple tank</td><td>click / drag &middot; <code>Space</code> &middot; <code>W</code> &middot; <code>B</code> &middot; <code>E</code> &middot; <code>C</code></td><td>Drop pebbles (macOS) &middot; random drop &middot; wave maker &middot; two slits &middot; walls or open water &middot; calm</td></tr>
   </tbody>
 </table>
 </div>
@@ -321,10 +323,14 @@ footer h2 { margin-top: 0; font-size: 1.1rem; color: var(--ink); }
         // 2. Input.
         for (int k = term::readKey(); k != KEY_NONE; k = term::readKey()) {
             if (k == 'q' || k == KEY_ESC) return;
-            if (k == 'p')
+            if (k == KEY_CLICK) {
+                const term::Click&amp; c = term::lastClick();
+                if (!tooSmall(w, h) &amp;&amp; c.y &lt; h - 1) sim.onClick(c.x, c.y, c.drag);   // not on the status bar
+            } else if (k == 'p') {
                 paused = !paused;
-            else
+            } else {
                 sim.onKey(k);
+            }
         }
 
         // 3. Update, 4. draw, 5. show.
@@ -353,6 +359,7 @@ public:
     virtual const char* help() const = 0;   // key hints shown in the status bar
     virtual void resize(int w, int h) = 0;
     virtual void onKey(int key) = 0;
+    virtual void onClick(int /*x*/, int /*y*/, bool /*drag*/) {}   // optional: most simulations ignore the mouse
     virtual void update(double dt) = 0;
     virtual void draw(Canvas&amp; cv) = 0;
 };</code></pre>
@@ -485,6 +492,7 @@ public:
     <tr><td>Window size</td><td><code>GetConsoleScreenBufferInfo</code></td><td><code>ioctl(TIOCGWINSZ)</code></td></tr>
     <tr><td>Keys without waiting</td><td><code>_kbhit()</code> + <code>_getch()</code></td><td>raw mode with <code>termios</code>, then <code>read()</code></td></tr>
     <tr><td>Clean up on Ctrl+C</td><td><code>SetConsoleCtrlHandler</code></td><td>signal handlers</td></tr>
+    <tr><td>The mouse</td><td>not read (keyboard only)</td><td>escape codes: <code>ESC[?1000h</code> turns reporting on</td></tr>
     <tr><td>Precise sleep</td><td><code>timeBeginPeriod(1)</code> + <code>Sleep</code></td><td><code>std::this_thread::sleep_for</code></td></tr>
   </tbody>
 </table>
@@ -509,11 +517,20 @@ public:
 
     const int next = readByteSoon();
     if (next != '[' &amp;&amp; next != 'O') return KEY_ESC;
-    // Skip any numbers and ';' (Shift+Up is ESC [ 1 ; 2 A) up to the final letter.
-    int last;
-    do {
-        last = readByteSoon();
-    } while (last &gt;= 0 &amp;&amp; (last &lt; 0x40 || last &gt; 0x7e));
+    // Collect any numbers and ';' (Shift+Up is ESC [ 1 ; 2 A) up to the final letter.
+    char params[32];
+    int n = 0, last;
+    while ((last = readByteSoon()) &gt;= 0 &amp;&amp; (last &lt; 0x40 || last &gt; 0x7e))
+        if (n &lt; int(sizeof params) - 1) params[n++] = char(last);
+    params[n] = '\0';
+
+    if (params[0] == '&lt;' &amp;&amp; last == 'M') {   // a mouse report (we ignore releases, 'm')
+        int button = 0, col = 0, row = 0;
+        if (std::sscanf(params + 1, "%d;%d;%d", &amp;button, &amp;col, &amp;row) != 3) return KEY_NONE;
+        if (button != 0 &amp;&amp; button != 32) return KEY_NONE;   // only the left button: no wheel, no right-click
+        click = {col - 1, row - 1, button == 32};
+        return KEY_CLICK;
+    }
     switch (last) {
         case 'A': return KEY_UP;
         case 'B': return KEY_DOWN;
@@ -522,7 +539,8 @@ public:
         default: return KEY_NONE;   // some other special key (F1, Home...): ignore it
     }
 }</code></pre>
-<aside class="note"><b>Tested in a pseudo-terminal:</b> all three arrow forms, Esc, Ctrl+C, <code>kill</code>, Ctrl+Z then <code>fg</code>, and the 256-colour fallback. After quitting, <code>stty -a</code> matched its output from before the program started.</aside>
+<aside class="note"><b>Tested in a pseudo-terminal:</b> all three arrow forms, Esc, mouse clicks and drags, Ctrl+C, <code>kill</code>, Ctrl+Z then <code>fg</code>, and the 256-colour fallback. After quitting, <code>stty -a</code> matched its output from before the program started.</aside>
+<p><strong>The mouse is escape codes too.</strong> At the start the program sends <code>ESC[?1000h</code> (report button presses), <code>ESC[?1002h</code> (and movement while a button is held) and <code>ESC[?1006h</code> (in the SGR format). From then on a left click at column 12, row 5 arrives as <code>ESC [ &lt; 0 ; 12 ; 5 M</code>, counting from 1. The first number is 32 while dragging, and a lower-case <code>m</code> is the release. <code>readKey()</code> above collects everything between <code>[</code> and the final letter, returns <code>KEY_CLICK</code>, and <code>term::lastClick()</code> says where. <code>main.cpp</code> hands the click to the simulation&rsquo;s <code>onClick(x, y, drag)</code>, a virtual function whose default does nothing, so only the <a href="#ripples">ripple tank</a> needs to override it. The menu uses clicks too: click a line to start that simulation. The leave codes switch reporting off again, even on Ctrl+C, so your shell doesn&rsquo;t fill up with mouse codes afterwards.</p>
 <p><strong>Signals.</strong> On a Mac, Ctrl+C reaches the program as a <em>signal</em>, <code>SIGINT</code>. Closing the window sends <code>SIGHUP</code>, and <code>kill</code> sends <code>SIGTERM</code>. A signal handler can run in the middle of anything, even halfway through allocating memory, so it may only call <em>async-signal-safe</em> functions such as <code>write()</code> and <code>tcsetattr()</code>. <code>printf</code> and <code>std::string</code> are off limits, which is why the restore codes are plain <code>const char</code> arrays.</p>
 <pre class="code"><span class="src">src/platform_mac.cpp</span><code class="language-cpp">void onQuitSignal(int sig) {
     term::restore();
@@ -611,9 +629,9 @@ public:
 
     // ...and phi spins that small circle around the Y axis, sweeping out the whole donut.
     for (const Rotation&amp; p : phiTable_) {
-        // Build the donut (rotate by phi), tumble it (rotate by A, then by B), swell it by s, then
-        // move it to where it is. The normal is a direction, not a place: it only turns.
-        const Vec3 point = s * rotateZ(rotateX(rotateY(circlePoint, p), rotA), rotB) + c;
+        // Build the donut (rotate by phi), tumble it (rotate by A, then by B), then move it to
+        // where it is. The normal is a direction, not a place: it turns but doesn't move.
+        const Vec3 point = rotateZ(rotateX(rotateY(circlePoint, p), rotA), rotB) + c;
         const Vec3 normal = rotateZ(rotateX(rotateY(circleNormal, p), rotA), rotB);
 
         // Perspective projection: things further away (bigger z) look smaller.
@@ -656,15 +674,13 @@ public:
       <input type="radio" name="lab-ratio" id="lr-2" value="2" checked><label for="lr-2">sin 2t</label>
       <input type="radio" name="lab-ratio" id="lr-3" value="3"><label for="lr-3">sin 3t</label>
     </span>
-    <label class="ctl" for="lab-zeta">damping &zeta; <input type="range" id="lab-zeta" min="0.05" max="1" step="0.01" value="0.38"><output id="lab-zeta-out" for="lab-zeta">0.38</output></label>
-    <span class="ctl"><button class="key" type="button" data-key=" ">Space</button> pulse</span>
     <span class="ctl"><button class="key" type="button" data-key="t">T</button> trail</span>
     <span class="ctl"><button class="key" type="button" data-key="p">P</button> pause</span>
     <button class="key" type="button" id="lab-reset">program&rsquo;s values</button>
     <span class="readout" id="lab-fov"></span>
   </div>
 </figure>
-<p class="term-caption">The same flying donut with its constants on sliders: <code>kFlyZoom</code>, <code>kFogDensity</code>, the 2 in <code>sin(2 * t)</code> and the pulse&rsquo;s <code>kSpringZeta</code>. The program&rsquo;s values are 2.5, 0.06, 2 and 0.38.</p>
+<p class="term-caption">The same flying donut with its constants on sliders: <code>kFlyZoom</code>, <code>kFogDensity</code> and the 2 in <code>sin(2 * t)</code>. The program&rsquo;s values are 2.5, 0.06 and 2.</p>
 <p>A path chosen directly in 3D makes it hard to keep the donut on screen, so the flight is designed in two parts, depth and screen position, and then turned into 3D:</p>
 <div class="math"><math display="block"><mtable columnalign="right left" columnspacing="0.3em" rowspacing="0.5em"><mtr><mtd><mi>z</mi><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo></mtd><mtd><mo>=</mo><mn>10</mn><mo>&minus;</mo><mn>4</mn><mi>cos</mi><mo>&#x2061;</mo><mn>2</mn><mi>t</mi></mtd></mtr><mtr><mtd><mi>u</mi><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo></mtd><mtd><mo>=</mo><msub><mtext>room</mtext><mi>x</mi></msub><mo stretchy="false">(</mo><mi>z</mi><mo stretchy="false">)</mo><mspace width="0.2em"/><mi>sin</mi><mo>&#x2061;</mo><mi>t</mi></mtd></mtr><mtr><mtd><mi>v</mi><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo></mtd><mtd><mo>=</mo><msub><mtext>room</mtext><mi>y</mi></msub><mo stretchy="false">(</mo><mi>z</mi><mo stretchy="false">)</mo><mspace width="0.2em"/><mi>sin</mi><mo>&#x2061;</mo><mn>2</mn><mi>t</mi></mtd></mtr></mtable></math></div>
 <p><em>u</em> and <em>v</em> are columns right of and rows below the window&rsquo;s centre. <em>v</em> goes round twice while <em>u</em> goes round once, and that traces an 8: a <strong>Lissajous curve</strong>. <em>t</em> goes once from 0 to 2&pi; every 12 seconds. The depth is smallest (6) each time the donut crosses the middle of the 8 and largest (14) at the ends of the two loops, so it swoops towards you through the centre and recedes into the distance at the sides. Try <em>sin 3t</em> in the panel for a different Lissajous figure.</p>
@@ -724,33 +740,6 @@ public:
   <details class="data"><summary>Show the numbers</summary><div class="table-wrap"><table id="fog-table"></table></div></details>
 </figure>
 <p><strong>The trail</strong> is the last 75 centre positions (2.5 seconds), drawn as dots that fade with age. Each dot goes through the same z-buffer test as the donut, so the donut hides the dots behind it, and you can see the newest ones through its hole: the centre of a donut is in the middle of its hole.</p>
-
-<h3 id="pulse">The pulse: a spring and a blast wave</h3>
-<p>Each time the flying donut swoops through the middle of the 8, and whenever you press Space, it <strong>pulses</strong> like a drop hitting water: it pops, and ripple rings spread out from where it was. You can try it in the flight lab above, which also lets you change how bouncy the pop is.</p>
-<p><strong>The pop is a damped spring.</strong> The donut&rsquo;s size is <em>s</em>&nbsp;=&nbsp;1&nbsp;+&nbsp;<em>x</em>, and <em>x</em> behaves like a weight on a spring with friction:</p>
-<div class="math"><math display="block"><mrow><mover><mi>x</mi><mo>&uml;</mo></mover><mo>=</mo><mo>&minus;</mo><msubsup><mi>&omega;</mi><mn>0</mn><mn>2</mn></msubsup><mi>x</mi><mo>&minus;</mo><mn>2</mn><mi>&zeta;</mi><msub><mi>&omega;</mi><mn>0</mn></msub><mover><mi>x</mi><mo>&#x2d9;</mo></mover><mspace width="2em"/><msub><mi>&omega;</mi><mn>0</mn></msub><mo>=</mo><mn>17</mn><mspace width="0.2em"/><mtext>rad/s</mtext><mo>,</mo><mspace width="1em"/><mi>&zeta;</mi><mo>=</mo><mn>0.38</mn></mrow></math></div>
-<p>The spring pulls <em>x</em> back to 0, normal size, and the damping takes energy out. A pulse is a sudden kick to the speed, <em>x&#775;</em>&nbsp;+=&nbsp;6.9 per second, like flicking the weight. &omega;<sub>0</sub> sets how stiff the spring is, and &zeta;, the <em>damping ratio</em>, sets its character: at &zeta;&nbsp;=&nbsp;0 it would wobble for ever, at &zeta;&nbsp;&ge;&nbsp;1 it creeps back without overshooting, and in between it bounces. Each overshoot is the same fraction of the one before:</p>
-<div class="math"><math display="block"><mrow><mfrac><mtext>next overshoot</mtext><mtext>this overshoot</mtext></mfrac><mo>=</mo><msup><mi>e</mi><mrow><mo>&minus;</mo><mi>&pi;</mi><mi>&zeta;</mi><mo>/</mo><msqrt><mrow><mn>1</mn><mo>&minus;</mo><msup><mi>&zeta;</mi><mn>2</mn></msup></mrow></msqrt></mrow></msup></mrow></math></div>
-<p>With &zeta;&nbsp;=&nbsp;0.38 that fraction is 0.28, which gives the pop its natural feel: 1.25&times; after 75&nbsp;ms, back down to 0.93&times; at 274&nbsp;ms, and within 1% of normal by 541&nbsp;ms. The same kind of springy overshoot is what makes animations on a phone feel physical.</p>
-<figure class="chart-fig">
-  <div class="chart" id="spring-chart"></div>
-  <figcaption id="spring-caption">The donut&rsquo;s size after one kick, with the damping from the flight lab.</figcaption>
-  <details class="data"><summary>Show the numbers</summary><div class="table-wrap"><table id="spring-table"></table></div></details>
-</figure>
-<pre class="code"><span class="src">src/donut.cpp</span><code class="language-cpp">void pulse() {
-    swellV_ = std::max(swellV_, 0.0) + kKick;   // a new kick always pops OUT, even mid-wobble
-    rings_.push_back({centre(), 0});
-    if (int(rings_.size()) &gt; kMaxRings) rings_.erase(rings_.begin());
-}</code></pre>
-<p>The spring is stepped in fixed 1&nbsp;ms steps, like the pendulum, with <strong>semi-implicit Euler</strong>: it changes the speed first, then moves with the <em>new</em> speed. Plain Euler would work out both from the old values, and for an oscillator that slowly pumps energy in. With no damping, the wobble would grow by about 15% every second. Using the new speed costs nothing extra and doesn&rsquo;t.</p>
-<pre class="code"><span class="src">src/donut.cpp</span><code class="language-cpp">void stepSpring(double h) {
-    swellV_ += (-kSpringW0 * kSpringW0 * swell_ - 2 * kSpringZeta * kSpringW0 * swellV_) * h;
-    swell_ += swellV_ * h;
-}</code></pre>
-<p>A swollen donut is closer to you at its nearest point, so the sampling steps from <a href="#sampling">the sampling-holes section</a> use the swollen size, <em>z</em><sub>nearest</sub>&nbsp;=&nbsp;<em>c</em><sub>z</sub>&nbsp;&minus;&nbsp;(<em>R</em><sub>1</sub>&nbsp;+&nbsp;<em>R</em><sub>2</sub>)&middot;<em>s</em>. A test that compares frames against a much denser rendering found no new holes, and with no pulse the spin-in-place mode still draws exactly what the original program did.</p>
-<p><strong>The rings grow like a blast wave.</strong> A sudden burst of energy spreading into its surroundings slows down as it sweeps up more of them. For an explosion in open air the shock front&rsquo;s radius grows as <em>t</em><sup>2/5</sup> (the Sedov&ndash;Taylor blast wave), and the rings use the same law, fading as they go:</p>
-<div class="math"><math display="block"><mrow><mi>r</mi><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo><mo>=</mo><mo stretchy="false">(</mo><msub><mi>R</mi><mn>1</mn></msub><mo>+</mo><msub><mi>R</mi><mn>2</mn></msub><mo stretchy="false">)</mo><mrow><mo>(</mo><mn>1.1</mn><mo>+</mo><mn>1.6</mn><msup><mrow><mo>(</mo><mfrac><mi>t</mi><mi>T</mi></mfrac><mo>)</mo></mrow><mn>0.4</mn></msup><mo>)</mo></mrow><mspace width="2em"/><mtext>brightness</mtext><mo>=</mo><msup><mrow><mo>(</mo><mn>1</mn><mo>&minus;</mo><mfrac><mi>t</mi><mi>T</mi></mfrac><mo>)</mo></mrow><mn>2</mn></msup><mo>,</mo><mspace width="1em"/><mi>T</mi><mo>=</mo><mn>1.2</mn><mspace width="0.2em"/><mtext>s</mtext></mrow></math></div>
-<p><em>t</em><sup>0.4</sup> starts infinitely fast and keeps slowing down, so a ring bursts out of the donut and drifts to a stop as it fades, drawn as <code>~</code> while it is bright, then <code>-</code>, then <code>.</code>. A second, fainter ring follows 0.15&nbsp;s later, like the second ripple in a pond. On screen each ring is an ellipse twice as wide as it is tall, because the cells are twice as tall as they are wide. It stays where the splash happened while the donut flies on, and its dots go through the z-buffer, so the donut hides any part of a ring behind it.</p>
 
 <!-- ============================================================ MATRIX -->
 <h2 id="matrix"><span class="mkey">[2]</span>Matrix rain</h2>
@@ -912,6 +901,103 @@ State stepRK4(const State&amp; s, double h) {
 <p>This is <strong>chaos</strong>. The motion is completely deterministic, with no randomness at all, yet tiny differences grow exponentially, so long-term prediction is impossible in practice. It isn&rsquo;t numerical error either: RK4 is accurate here, and the physics itself magnifies the difference. The same butterfly effect is why weather forecasts stop being reliable after about a week.</p>
 <p><strong>Drawing it.</strong> The pivot is the centre of the grid, and one metre is <code>rowsPerMetre</code> rows down but twice as many columns across. Each rod is drawn by stepping along it one cell at a time (a <em>DDA</em> line), with <code>-</code>, <code>/</code>, <code>|</code> or <code>\</code> picked from <code>atan2(-dy * 2, dx)</code>, the &times;2 again correcting for tall cells. The last 400 positions of the lower weight live in a <code>std::deque</code>, which adds at the back and drops from the front cheaply, and older points are drawn dimmer and smaller: <code>*</code>, then <code>:</code>, then <code>.</code>.</p>
 
+<!-- ============================================================ RIPPLES -->
+<h2 id="ripples"><span class="mkey">[5]</span>Ripple tank</h2>
+<p class="eyebrow">ripples.cpp</p>
+<figure class="term wide" id="ripple-term" aria-label="Live ripple tank">
+  <div class="term-bar"><span><b data-title>ascii-sims</b></span><span data-dims></span></div>
+  <pre class="screen" tabindex="0" role="img" aria-label="A ripple tank seen from above. Click or drag on it to drop pebbles; rings of waves spread out and cross. Keys: Space, W, B, E, C, P."></pre>
+  <div class="controls">
+    <span class="ctl"><button class="key" type="button" data-key=" ">Space</button> random drop</span>
+    <span class="ctl"><button class="key" type="button" data-key="w">W</button> wave maker</span>
+    <span class="ctl"><button class="key" type="button" data-key="b">B</button> two slits</span>
+    <span class="ctl"><button class="key" type="button" data-key="e">E</button> edges</span>
+    <span class="ctl"><button class="key" type="button" data-key="c">C</button> calm</span>
+    <span class="ctl"><button class="key" type="button" data-key="p">P</button> pause</span>
+    <span class="hint">click or drag on the water</span>
+  </div>
+</figure>
+<p class="term-caption">Click anywhere on the water and a pebble drops in; drag to pull a finger through it. In the program you click in the Terminal window the same way. Press W and then B for Young&rsquo;s double-slit experiment.</p>
+<p>Click, and a ring of waves pops out from that spot and spreads. Click twice and the two rings pass straight through each other. This is real water physics: the <strong>2D wave equation</strong>, solved on a grid 90 times a second.</p>
+
+<h3 id="wave-equation">The wave equation</h3>
+<p><em>u</em>(<em>x</em>,&nbsp;<em>y</em>) is how far the water is above, or below, its calm level. For small waves:</p>
+<div class="math"><math display="block"><mrow><mfrac><mrow><msup><mo>&part;</mo><mn>2</mn></msup><mi>u</mi></mrow><mrow><mo>&part;</mo><msup><mi>t</mi><mn>2</mn></msup></mrow></mfrac><mo>=</mo><msup><mi>c</mi><mn>2</mn></msup><mrow><mo>(</mo><mfrac><mrow><msup><mo>&part;</mo><mn>2</mn></msup><mi>u</mi></mrow><mrow><mo>&part;</mo><msup><mi>x</mi><mn>2</mn></msup></mrow></mfrac><mo>+</mo><mfrac><mrow><msup><mo>&part;</mo><mn>2</mn></msup><mi>u</mi></mrow><mrow><mo>&part;</mo><msup><mi>y</mi><mn>2</mn></msup></mrow></mfrac><mo>)</mo></mrow></mrow></math></div>
+<p>The left side is the water&rsquo;s acceleration. The right side is the surface&rsquo;s <em>curvature</em> (the <strong>Laplacian</strong>), which is large where a point sits lower than the average of its neighbours. So every bit of water accelerates towards the average of its neighbours. A dip pulls the water around it down, which pulls the water around <em>that</em> down, and the disturbance travels outwards as a ring at speed <em>c</em>.</p>
+
+<h3 id="finite-differences">On a grid: finite differences</h3>
+<figure class="diagram">
+<svg viewBox="0 0 520 210" role="img" aria-label="The five-point stencil: a cell and its four neighbours. The neighbours each count once and the cell itself counts minus four.">
+  <rect class="box" x="210" y="20" width="56" height="56" rx="4"/><text x="238" y="44" text-anchor="middle">up</text><text x="238" y="62" text-anchor="middle" class="small">+1</text>
+  <rect class="box" x="150" y="80" width="56" height="56" rx="4"/><text x="178" y="104" text-anchor="middle">left</text><text x="178" y="122" text-anchor="middle" class="small">+1</text>
+  <rect class="box hot" x="210" y="80" width="56" height="56" rx="4"/><text x="238" y="104" text-anchor="middle">u</text><text x="238" y="122" text-anchor="middle" class="hottext" style="font-size:11px">&minus;4</text>
+  <rect class="box" x="270" y="80" width="56" height="56" rx="4"/><text x="298" y="104" text-anchor="middle">right</text><text x="298" y="122" text-anchor="middle" class="small">+1</text>
+  <rect class="box" x="210" y="140" width="56" height="56" rx="4"/><text x="238" y="164" text-anchor="middle">down</text><text x="238" y="182" text-anchor="middle" class="small">+1</text>
+  <text x="350" y="100">sum = the Laplacian:</text>
+  <text x="350" y="120" class="small">0 when u is the average</text>
+  <text x="350" y="136" class="small">of its four neighbours</text>
+</svg>
+<figcaption>The five-point stencil. Each cell of the tank looks only at its four neighbours.</figcaption>
+</figure>
+<p>A second derivative is &ldquo;how much the slope changes&rdquo;, which on a grid becomes a difference of differences, <em>u</em>[<em>x</em>&minus;1]&nbsp;&minus;&nbsp;2<em>u</em>[<em>x</em>]&nbsp;+&nbsp;<em>u</em>[<em>x</em>+1]. Doing the same in time and in both directions gives the update the program runs for every cell, every step:</p>
+<div class="math"><math display="block"><mrow><msub><mi>u</mi><mtext>next</mtext></msub><mo>=</mo><munder><munder><mrow><mi>u</mi><mo>+</mo><mo stretchy="false">(</mo><mi>u</mi><mo>&minus;</mo><msub><mi>u</mi><mtext>prev</mtext></msub><mo stretchy="false">)</mo></mrow><mo>&#x23DF;</mo></munder><mtext>keep moving</mtext></munder><mo>+</mo><munder><munder><mrow><msup><mi>C</mi><mn>2</mn></msup><mo stretchy="false">(</mo><msub><mi>u</mi><mtext>left</mtext></msub><mo>+</mo><msub><mi>u</mi><mtext>right</mtext></msub><mo>+</mo><msub><mi>u</mi><mtext>up</mtext></msub><mo>+</mo><msub><mi>u</mi><mtext>down</mtext></msub><mo>&minus;</mo><mn>4</mn><mi>u</mi><mo stretchy="false">)</mo></mrow><mo>&#x23DF;</mo></munder><mtext>accelerate towards the neighbours&rsquo; average</mtext></munder></mrow></math></div>
+<p><em>u</em><sub>prev</sub> is the water one step ago, so <em>u</em>&nbsp;&minus;&nbsp;<em>u</em><sub>prev</sub> is its speed. Each cell&rsquo;s new value needs only its own <em>u</em><sub>prev</sub>, so the code writes the result straight into <code>prev_</code> and then swaps the two arrays, which costs nothing because <code>std::vector::swap</code> only swaps their pointers.</p>
+<pre class="code"><span class="src">src/ripples.cpp</span><code class="language-cpp">void step() {
+    for (int y = 0; y &lt; gh_; ++y) {
+        for (int x = 0; x &lt; gw_; ++x) {
+            const int i = y * gw_ + x;
+            if (wall_[i]) {
+                prev_[i] = 0;   // a barrier: the water there can't move
+                continue;
+            }
+            const float c = u_[i];
+            const float left = x &gt; 0 &amp;&amp; !wall_[i - 1] ? u_[i - 1] : c;
+            const float right = x &lt; gw_ - 1 &amp;&amp; !wall_[i + 1] ? u_[i + 1] : c;
+            const float up = y &gt; 0 &amp;&amp; !wall_[i - gw_] ? u_[i - gw_] : c;
+            const float down = y &lt; gh_ - 1 &amp;&amp; !wall_[i + gw_] ? u_[i + gw_] : c;
+            const float laplacian = left + right + up + down - 4 * c;
+            prev_[i] = c + (c - prev_[i]) * (1 - damping(x, y)) + kCourant2 * laplacian;
+        }
+    }
+    u_.swap(prev_);
+    // The wave maker: a straight bar near the left edge, bobbing up and down. It sends out
+    // straight (plane) waves, like the vibrating bar in a school ripple tank.
+    if (maker_) {
+        const float lift = kMakerSize * float(std::sin(2 * 3.14159265 * kMakerFreq * time_));
+        for (int y = 0; y &lt; gh_; ++y) u_[y * gw_ + 2] = lift;
+    }
+}</code></pre>
+<aside class="note"><b>Round rings on tall cells.</b> The grid has two rows for every terminal row, so its cells are square: one column wide, half a row tall. Each terminal cell shows the two grid cells behind it.</aside>
+
+<h3 id="cfl">The CFL limit: why the step size matters</h3>
+<p><em>C</em> is the <strong>Courant number</strong>, how many cells a wave moves in one step:</p>
+<div class="math"><math display="block"><mrow><mi>C</mi><mo>=</mo><mfrac><mrow><mi>c</mi><mspace width="0.1em"/><mi>&Delta;</mi><mi>t</mi></mrow><mrow><mi>&Delta;</mi><mi>x</mi></mrow></mfrac><mo>,</mo><mspace width="2em"/><mtext>stable only if</mtext><mspace width="0.6em"/><msup><mi>C</mi><mn>2</mn></msup><mo>&le;</mo><mfrac><mn>1</mn><mn>2</mn></mfrac><mspace width="0.6em"/><mtext>(in 2D)</mtext></mrow></math></div>
+<p>If a wave could jump further than about one cell per step, the grid couldn&rsquo;t keep up: errors grow a little every step until the numbers explode. That is the Courant&ndash;Friedrichs&ndash;Lewy (CFL) condition. The program uses <em>C</em><sup>2</sup>&nbsp;=&nbsp;0.25 with 90 fixed steps per second, so waves travel 0.5&nbsp;&times;&nbsp;90&nbsp;=&nbsp;45 cells a second. With all damping removed, a test ran calmly for 30&nbsp;s at <em>C</em><sup>2</sup>&nbsp;=&nbsp;0.25 and at 0.45, but at 0.55 the whole screen saturated within 2&nbsp;seconds.</p>
+
+<h3 id="drops">Drops, edges and light</h3>
+<ul>
+  <li><strong>A drop</strong> pushes the water down in a smooth bell-shaped dip, <em>depth</em>&nbsp;&middot;&nbsp;<em>e</em><sup>&minus;<em>r</em>&sup2;/2&sigma;&sup2;</sup> with &sigma;&nbsp;=&nbsp;2 cells. A one-cell spike would contain wiggles shorter than the grid can carry, which leave messy trails. Both <em>u</em> and <em>u</em><sub>prev</sub> move, so the water starts still, just out of place.</li>
+  <li><strong>Damping</strong> takes 0.7% of each cell&rsquo;s motion every step, so ripples fade over a few seconds.</li>
+  <li><strong>Edges.</strong> At a wall the code uses the cell&rsquo;s own value for the missing neighbour, so the surface meets the wall flat and waves bounce straight back, like the side of a real tank. In <em>open water</em> mode, the default, the last 10 cells round the edge get extra damping that rises gradually towards the wall: a sponge that soaks waves up, so each ring leaves instead of filling the tank. Damping that switched on suddenly would reflect waves itself. Press E to swap between the two.</li>
+  <li><strong>Light.</strong> The water is drawn by its tilt, as if lit from the top left: a slope facing the light is bright, one facing away is dark blue, and flat water is left blank.</li>
+</ul>
+<pre class="code"><span class="src">src/ripples.cpp</span><code class="language-cpp">void drop(float cx, float cy, float depth) {
+    const int r = int(3 * kDropWidth) + 1;
+    for (int y = int(cy) - r; y &lt;= int(cy) + r; ++y) {
+        for (int x = int(cx) - r; x &lt;= int(cx) + r; ++x) {
+            if (x &lt; 0 || y &lt; 0 || x &gt;= gw_ || y &gt;= gh_ || wall_[y * gw_ + x]) continue;
+            const float d2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+            const float push = depth * std::exp(-d2 / (2 * kDropWidth * kDropWidth));
+            u_[y * gw_ + x] -= push;
+            prev_[y * gw_ + x] -= push;
+        }
+    }
+}</code></pre>
+
+<h3 id="double-slit">Interference and Young&rsquo;s double slit</h3>
+<p>Waves simply add up. Where two crests meet the water rises twice as high, and where a crest meets a trough they cancel. Press W in the panel for the wave maker, a bar on the left that bobs 5.5 times a second and sends out straight waves 8 cells apart (45&nbsp;&divide;&nbsp;5.5). Then press B to put a wall in the way with two narrow gaps.</p>
+<p>Each gap becomes a new source of circular waves, and beyond the wall the two sets overlap in a fan of stripes: rough lines where they always add, calm lines where they always cancel. That is <strong>Young&rsquo;s double-slit experiment</strong> (1801), the experiment that showed light is a wave. The bands are subtle in text characters, so give the waves a few seconds to fill the right-hand side.</p>
+
 <!-- ============================================================ C++ -->
 <h2 id="cpp">C++ features, and where they are</h2>
 <div class="table-wrap wide">
@@ -934,6 +1020,8 @@ State stepRK4(const State&amp; s, double h) {
     <tr><td><code>&lt;random&gt;</code>, <code>std::mt19937</code></td><td><code>Random</code> in sim.h</td><td>Better random numbers than <code>rand()</code></td></tr>
     <tr><td><code>&lt;chrono&gt;</code></td><td><code>FrameClock</code></td><td>Precise time measurement</td></tr>
     <tr><td>Raw string literals <code>R"(&hellip;)"</code></td><td>the title in main.cpp</td><td>Backslashes in ASCII art without escaping them</td></tr>
+    <tr><td>A virtual function with a default body</td><td><code>Simulation::onClick</code></td><td>Optional to override: only the ripple tank does</td></tr>
+    <tr><td><code>std::vector::swap</code></td><td><code>u_.swap(prev_)</code> in ripples.cpp</td><td>Swap two whole grids instantly (just the pointers)</td></tr>
   </tbody>
 </table>
 </div>
@@ -1050,10 +1138,9 @@ class Canvas {
 const SHADES = ".,-~:;=!*#$@", NS = 12;
 const R1 = 1, R2 = 2, OUTER = R1 + R2, K2 = 5;
 const smoothstep = t => t * t * (3 - 2 * t);
-const SPRING_W0 = 17, KICK = 6.9, SPRING_H = 0.001, MAX_SWELL = 1.4, RING_T = 1.2, RING_REACH = 1.6, ECHO = 0.15, MAX_RINGS = 8;
 class Donut {
   constructor(o) {
-    this.o = Object.assign({ zoom: 2.5, fog: 0.06, ratio: 2, zeta: 0.38, view: "final", flying: true }, o || {});
+    this.o = Object.assign({ zoom: 2.5, fog: 0.06, ratio: 2, view: "final", flying: true }, o || {});
     this.warm = []; this.plain = []; this.depthPal = [];
     for (let i = 0; i < NS; i++) {
       const t = i / (NS - 1);
@@ -1061,11 +1148,10 @@ class Donut {
       this.plain[i] = lerpC(rgb(90, 90, 90), rgb(255, 255, 255), t);
       this.depthPal[i] = gradient([rgb(25, 45, 90), rgb(60, 140, 210), rgb(210, 240, 255)], t);
     }
-    this.help = "M fly/spin  T trail  Space pulse  +/- speed  C colour";
+    this.help = "M fly/spin  T trail  +/- speed  C colour";
     this.w = 0; this.h = 0; this.zbuf = new Float32Array(0);
     this.A = 0; this.B = 0; this.speed = 1; this.colour = true;
     this.flying = this.o.flying; this.fly = 0; this.t = 0; this.showTrail = true; this.trail = [];
-    this.swell = 0; this.swellV = 0; this.springLeft = 0; this.rings = [];
   }
   get name() { return this.flying ? "Flying Donut" : "Spinning Donut"; }
   resize(w, h) { this.w = w; this.h = h; this.zbuf = new Float32Array(w * h); this.trail = []; }
@@ -1075,32 +1161,15 @@ class Donut {
     if (k === "c") this.colour = !this.colour;
     if (k === "m") this.flying = !this.flying;
     if (k === "t") this.showTrail = !this.showTrail;
-    if (k === " ") this.pulse();
   }
   update(dt) {
     this.A += 1.2 * this.speed * dt;
     this.B += 0.6 * this.speed * dt;
-    const before = this.t;
     this.t = (this.t + TAU / 12 * this.speed * dt) % TAU;
-    const crossedMiddle = this.t < before || (before < Math.PI && this.t >= Math.PI);
-    if (crossedMiddle && this.fly >= 1) this.pulse();
-    this.springLeft += dt;
-    while (this.springLeft >= SPRING_H) { this.springLeft -= SPRING_H; this.stepSpring(SPRING_H); }
-    for (const r of this.rings) r.age += dt;
-    this.rings = this.rings.filter(r => r.age < RING_T + ECHO);
     const glide = dt / 1.5;
     this.fly = clamp(this.fly + (this.flying ? glide : -glide), 0, 1);
     if (this.fly > 0) this.trail.push(this.centre());
     if (this.trail.length > 75 || (this.fly === 0 && this.trail.length)) this.trail.shift();
-  }
-  pulse() {
-    this.swellV = Math.max(this.swellV, 0) + KICK;
-    this.rings.push({ at: this.centre(), age: 0 });
-    if (this.rings.length > MAX_RINGS) this.rings.shift();
-  }
-  stepSpring(h) {
-    this.swellV += (-SPRING_W0 * SPRING_W0 * this.swell - 2 * this.o.zeta * SPRING_W0 * this.swellV) * h;
-    this.swell += this.swellV * h;
   }
   focal() { return Math.min(this.w, 2 * this.h) * K2 * 3 / (8 * OUTER); }
   zoomNow() { return 1 + (this.o.zoom - 1) * smoothstep(this.fly); }
@@ -1124,8 +1193,8 @@ class Donut {
   draw(cv) {
     const w = this.w, h = this.h, view = this.o.view, zoom = this.zoomNow(), K1 = this.focal() * zoom;
     const seen = this.centre(), cx = seen[0], cy = seen[1], cz = seen[2] * zoom;
-    const s = clamp(1 + this.swell, 0.7, MAX_SWELL), zNear = cz - OUTER * s;
-    let tStep = Math.min(0.07, 0.9 * zNear / (K1 * R1 * s)), pStep = Math.min(0.02, 0.9 * zNear / (K1 * OUTER * s));
+    const zNear = cz - OUTER;
+    let tStep = Math.min(0.07, 0.9 * zNear / (K1 * R1)), pStep = Math.min(0.02, 0.9 * zNear / (K1 * OUTER));
     if (view === "sparse") { tStep = 0.07; pStep = 0.02; }
     const cosP = [], sinP = [];
     for (let p = 0; p < TAU; p += pStep) { cosP.push(Math.cos(p)); sinP.push(Math.sin(p)); }
@@ -1140,7 +1209,7 @@ class Donut {
         const cp = cosP[j], sp = sinP[j];
         const x1 = px0 * cp, z1 = -px0 * sp;                         // rotateY by phi
         const y2 = py0 * cA - z1 * sA, z2 = py0 * sA + z1 * cA;      // rotateX by A
-        const X = s * (x1 * cB - y2 * sB) + cx, Y = s * (x1 * sB + y2 * cB) + cy, Z = s * z2 + cz;   // rotateZ by B, swell, move
+        const X = x1 * cB - y2 * sB + cx, Y = x1 * sB + y2 * cB + cy, Z = z2 + cz;   // rotateZ by B, then move
         const ooz = 1 / Z;
         const sx = Math.trunc(hw + K1 * ooz * X), sy = Math.trunc(hh - K1 * ooz * Y * 0.5);
         if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;
@@ -1171,32 +1240,12 @@ class Donut {
         cv.set(sx, sy, ".", lerpC(0, bright, level));
       }
     }
-    for (const r of this.rings) {
-      this.drawRing(cv, this.focal(), zoom, r.at, r.age, 1);
-      this.drawRing(cv, this.focal(), zoom, r.at, r.age - ECHO, 0.55);
-    }
     if (this.flying) {
       cv.text(0, 0, " flying   depth z = " + seen[2].toFixed(1).padStart(4) + "   looks " +
         String(Math.round(100 * K2 / seen[2])).padStart(3) + "% as big as at z = 5", rgb(160, 160, 160));
     }
   }
 }
-
-Donut.prototype.drawRing = function (cv, K1, zoom, at, age, strength) {
-  if (age < 0 || age >= RING_T) return;
-  const u = age / RING_T, radius = OUTER * (1.1 + RING_REACH * Math.pow(u, 0.4));
-  const fade = (1 - u) * (1 - u) * strength * this.fogAt(at[2]);
-  const ch = fade > 0.45 ? "~" : fade > 0.2 ? "-" : ".";
-  const col = lerpC(0, this.colour ? rgb(255, 215, 150) : rgb(235, 235, 235), Math.round(fade * 10) / 10);
-  const w = this.w, h = this.h, cx = w / 2 + K1 * at[0] / at[2], cy = h / 2 - K1 * at[1] / at[2] * 0.5;
-  const rx = K1 * radius / at[2], ooz = 1 / (at[2] * zoom), steps = Math.trunc(TAU * rx / 0.7) + 8;
-  for (let i = 0; i < steps; i++) {
-    const a = TAU * i / steps, sx = Math.trunc(cx + rx * Math.cos(a)), sy = Math.trunc(cy - rx * 0.5 * Math.sin(a));
-    if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;
-    if (ooz <= this.zbuf[sy * w + sx]) continue;
-    cv.set(sx, sy, ch, col);
-  }
-};
 
 // ---- [2] matrix.cpp
 const GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&*+=-<>?!/\\|{}[]:;";
@@ -1382,6 +1431,99 @@ class Pendulum {
     for (const p of this.p) { p.trail.push(bobs(p.s)[1]); if (p.trail.length > PTRAIL) p.trail.shift(); }
   }
 }
+// ---- [5] ripples.cpp
+const RIP_STEP = 1 / 90, RIP_C2 = 0.25, RIP_DAMP = 0.007, SPONGE_DAMP = 0.12, SPONGE = 10;
+const DROP_DEPTH = 3, DRAG_DEPTH = 1, DROP_W = 2, MAKER_F = 5.5, MAKER_A = 0.55, CALM = 0.1, WAVE_LEVELS = 16;
+const WAVE_RAMP = " .:-=+*#%@";
+class Ripples {
+  constructor() {
+    this.name = "Ripple Tank"; this.help = "click drop  Space random  W wave maker  B slits  E edges  C calm";
+    this.crest = []; this.trough = [];
+    for (let i = 0; i < WAVE_LEVELS; i++) {
+      const t = i / (WAVE_LEVELS - 1);
+      this.crest[i] = gradient([rgb(20, 70, 130), rgb(60, 160, 230), rgb(170, 230, 255), rgb(245, 252, 255)], t);
+      this.trough[i] = gradient([rgb(10, 30, 70), rgb(25, 70, 150), rgb(40, 110, 200)], t);
+    }
+    this.maker = false; this.slits = false; this.open = true; this.left = 0; this.time = 0; this.w = 0; this.h = 0;
+  }
+  resize(w, h) {
+    this.w = w; this.h = h; this.gw = w; this.gh = 2 * h;
+    this.u = new Float32Array(this.gw * this.gh); this.prev = new Float32Array(this.gw * this.gh);
+    this.buildWalls();
+    this.drop(this.gw / 2, this.gh / 2, DROP_DEPTH);
+  }
+  onKey(k) {
+    if (k === " ") this.drop(rnd(0, this.gw), rnd(0, this.gh), DROP_DEPTH);
+    if (k === "w") this.maker = !this.maker;
+    if (k === "b") { this.slits = !this.slits; this.buildWalls(); }
+    if (k === "e") this.open = !this.open;
+    if (k === "c") { this.u.fill(0); this.prev.fill(0); }
+  }
+  onClick(x, y, drag) { this.drop(x + 0.5, 2 * y + 1, drag ? DRAG_DEPTH : DROP_DEPTH); }
+  update(dt) {
+    this.left += dt;
+    while (this.left >= RIP_STEP) { this.left -= RIP_STEP; this.time += RIP_STEP; this.step(); }
+  }
+  at(x, y) { return this.u[clamp(y, 0, this.gh - 1) * this.gw + clamp(x, 0, this.gw - 1)]; }
+  drop(cx, cy, depth) {
+    const r = Math.trunc(3 * DROP_W) + 1, gw = this.gw, gh = this.gh;
+    for (let y = Math.trunc(cy) - r; y <= Math.trunc(cy) + r; y++) for (let x = Math.trunc(cx) - r; x <= Math.trunc(cx) + r; x++) {
+      if (x < 0 || y < 0 || x >= gw || y >= gh || this.wall[y * gw + x]) continue;
+      const d2 = (x - cx) * (x - cx) + (y - cy) * (y - cy), push = depth * Math.exp(-d2 / (2 * DROP_W * DROP_W));
+      this.u[y * gw + x] -= push; this.prev[y * gw + x] -= push;
+    }
+  }
+  damping(x, y) {
+    if (!this.open) return RIP_DAMP;
+    const edge = Math.min(x, this.gw - 1 - x, y, this.gh - 1 - y);
+    if (edge >= SPONGE) return RIP_DAMP;
+    const t = (SPONGE - edge) / SPONGE;
+    return RIP_DAMP + SPONGE_DAMP * t * t;
+  }
+  step() {
+    const gw = this.gw, gh = this.gh, u = this.u, prev = this.prev, wall = this.wall;
+    for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
+      const i = y * gw + x;
+      if (wall[i]) { prev[i] = 0; continue; }
+      const c = u[i];
+      const left = x > 0 && !wall[i - 1] ? u[i - 1] : c, right = x < gw - 1 && !wall[i + 1] ? u[i + 1] : c;
+      const up = y > 0 && !wall[i - gw] ? u[i - gw] : c, down = y < gh - 1 && !wall[i + gw] ? u[i + gw] : c;
+      prev[i] = c + (c - prev[i]) * (1 - this.damping(x, y)) + RIP_C2 * (left + right + up + down - 4 * c);
+    }
+    this.u = prev; this.prev = u;
+    if (this.maker) {
+      const lift = MAKER_A * Math.sin(2 * 3.14159265 * MAKER_F * this.time);
+      for (let y = 0; y < gh; y++) this.u[y * gw + 2] = lift;
+    }
+  }
+  buildWalls() {
+    const gw = this.gw, gh = this.gh;
+    this.wall = new Uint8Array(gw * gh);
+    if (!this.slits) return;
+    const wx = Math.trunc(gw * 2 / 5), gap = 3, apart = clamp(Math.trunc(gh / 3), 14, 36);
+    for (let y = 0; y < gh; y++) {
+      const d1 = Math.abs(y - (Math.trunc(gh / 2) - Math.trunc(apart / 2))), d2 = Math.abs(y - (Math.trunc(gh / 2) + Math.trunc(apart / 2)));
+      if (d1 <= gap || d2 <= gap) continue;
+      for (let x = wx; x < wx + 2; x++) this.wall[y * gw + x] = 1;
+    }
+    for (let i = 0; i < this.wall.length; i++) if (this.wall[i]) { this.u[i] = 0; this.prev[i] = 0; }
+  }
+  draw(cv) {
+    const w = this.w, h = this.h, gw = this.gw;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const a = 2 * y * gw + x, b = a + gw;
+      if (this.wall[a]) { cv.set(x, y, "#", rgb(120, 120, 130)); continue; }
+      const tiltX = this.at(x - 1, 2 * y) - this.at(x + 1, 2 * y), tiltY = this.at(x, 2 * y - 1) - this.at(x, 2 * y + 2);
+      const lit = 0.35 * (this.u[a] + this.u[b]) + 1.6 * (tiltX + tiltY), mag = Math.abs(lit);
+      if (mag < CALM) continue;
+      const ch = Math.min(Math.trunc((mag - CALM) * 6) + 1, WAVE_RAMP.length - 1), level = Math.min(Math.trunc(mag * 8), WAVE_LEVELS - 1);
+      cv.set(x, y, WAVE_RAMP[ch], lit > 0 ? this.crest[level] : this.trough[level]);
+    }
+    if (this.maker) for (let y = 0; y < h; y++) cv.set(2, y, "|", rgb(255, 200, 60));
+    cv.text(0, 0, " ripple tank   click anywhere to drop a pebble   edges: " + (this.open ? "open water (absorb)" : "walls (reflect)") +
+      "   waves: " + Math.round(Math.sqrt(RIP_C2) / RIP_STEP) + " cells/s", rgb(160, 160, 160));
+  }
+}
 // ==== END ENGINES ====
 
 // ==== PAGE ====
@@ -1404,7 +1546,7 @@ function keyOf(e) {
   if (e.metaKey || e.ctrlKey || e.altKey) return null;
   const named = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", " ": " " };
   if (named[e.key]) return named[e.key];
-  if (e.key.length === 1) { const k = e.key.toLowerCase(); if ("mtcp+-=ri".includes(k)) return k; }
+  if (e.key.length === 1) { const k = e.key.toLowerCase(); if ("mtcp+-=riwbe".includes(k)) return k; }
   return null;
 }
 
@@ -1416,6 +1558,23 @@ class Panel {
     this.paused = reduce; this.fps = 30; this.last = 0; this.visible = false; this.w = 0; this.h = 0; this.warmed = false;
     root.querySelectorAll("[data-key]").forEach(b => b.addEventListener("click", () => this.press(b.dataset.key)));
     this.screen.addEventListener("keydown", e => { const k = keyOf(e); if (k === null) return; e.preventDefault(); this.press(k); });
+    if (sim.onClick) {   // the ripple tank: clicks and drags on the screen, like the terminal's mouse reports
+      this.screen.classList.add("clickable");
+      let lastCell = "";
+      const hit = (e, drag) => {
+        if (!this.w) return;
+        const r = this.screen.getBoundingClientRect(), cs = getComputedStyle(this.screen);
+        const cw = (r.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)) / this.w;
+        const x = Math.floor((e.clientX - r.left - parseFloat(cs.paddingLeft)) / cw), y = Math.floor((e.clientY - r.top - parseFloat(cs.paddingTop)) / (2 * cw));
+        if (x < 0 || y < 0 || x >= this.w || y >= this.h - 1) return;   // not on the status bar
+        if (drag && x + "," + y === lastCell) return;                    // terminals report a drag once per cell
+        lastCell = x + "," + y;
+        this.sim.onClick(x, y, drag);
+        this.render();
+      };
+      this.screen.addEventListener("pointerdown", e => { this.screen.focus({ preventScroll: true }); lastCell = ""; hit(e, false); });
+      this.screen.addEventListener("pointermove", e => { if (e.buttons & 1) hit(e, true); });
+    }
     if ("IntersectionObserver" in window) {
       new IntersectionObserver(es => { this.visible = es[0].isIntersecting; this.last = 0; }, { rootMargin: "120px" }).observe(root);
     } else this.visible = true;
@@ -1532,7 +1691,7 @@ function lineChart(host, cfg) {
   const Y = v => H - m.b - (v - y0) / (y1 - y0) * (H - m.t - m.b);
   const svg = sv("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": cfg.label, tabindex: "0", class: "chart-svg" }, host);
   for (const t of yT) {
-    sv("line", { x1: m.l, x2: W - m.r, y1: Y(t), y2: Y(t), class: Math.abs(t - (cfg.base || 0)) < 1e-9 ? "axis" : "gridline" }, svg);
+    sv("line", { x1: m.l, x2: W - m.r, y1: Y(t), y2: Y(t), class: Math.abs(t) < 1e-12 ? "axis" : "gridline" }, svg);
     sv("text", { x: m.l - 8, y: Y(t) + 4, "text-anchor": "end", class: "tick" }, svg).textContent = cfg.yFmt(t);
   }
   for (const t of cfg.xTicks) sv("text", { x: X(t), y: H - m.b + 18, "text-anchor": "middle", class: "tick" }, svg).textContent = cfg.xFmt(t);
@@ -1629,37 +1788,6 @@ function energyChart(start) {
   fillTable(q("#energy-table"), ["time", "RK4 drift", "Euler drift"], rows);
 }
 
-function springChart(zeta) {
-  let x = 0, v = KICK;
-  const fine = [];
-  for (let i = 0; i <= 800; i++) {
-    fine.push([i / 1000, 1 + x]);
-    v += (-SPRING_W0 * SPRING_W0 * x - 2 * zeta * SPRING_W0 * v) * SPRING_H;
-    x += v * SPRING_H;
-  }
-  let pk = fine[0], tr = null;
-  for (const p of fine) if (p[1] > pk[1]) pk = p;
-  for (const p of fine) if (p[0] > pk[0] && (!tr || p[1] < tr[1])) tr = p;
-  const ms = t => Math.round(t * 1000) + " ms", times = v => v.toFixed(2) + "×";
-  const pts = fine.filter((p, i) => i % 4 === 0), lo = Math.min(...pts.map(p => p[1])), hi = Math.max(...pts.map(p => p[1]));
-  const markers = [{ x: pk[0], y: pk[1], cls: "s1", label: times(pk[1]) + " at " + ms(pk[0]), dx: 10, dy: 4, anchor: "start" }];
-  const bounces = tr && tr[1] < 0.995;
-  if (bounces) markers.push({ x: tr[0], y: tr[1], cls: "s1", label: times(tr[1]) + " at " + ms(tr[0]), dx: 10, dy: 16, anchor: "start" });
-  lineChart(q("#spring-chart"), {
-    label: "The donut's size after a kick, damping " + zeta + ": it peaks at " + times(pk[1]) + " after " + ms(pk[0]) +
-      (bounces ? " and swings back to " + times(tr[1]) + " at " + ms(tr[0]) : " and creeps back without overshooting") + ".",
-    x: [0, 0.8], xTicks: [0, 0.2, 0.4, 0.6, 0.8], xFmt: ms, xTitle: "time after the kick", right: 24, keyStep: 5, base: 1,
-    yTicks: niceTicks(Math.min(1, lo), Math.max(1, hi), 4), yFmt: times,
-    tipX: ms, tipY: v => v.toFixed(3) + "×",
-    series: [{ name: "size", cls: "s1", pts }], markers,
-  });
-  const rows = [];
-  for (let i = 0; i <= 800; i += 50) rows.push([ms(fine[i][0]), fine[i][1].toFixed(3) + "×"]);
-  fillTable(q("#spring-table"), ["time", "size"], rows);
-  q("#spring-caption").textContent = "The donut’s size after one kick, with damping ζ = " + zeta.toFixed(2) +
-    " from the flight lab (the program uses 0.38). The program draws sizes between 0.7× and 1.4×.";
-}
-
 function fogChart(k) {
   const f = z => Math.min(1, Math.exp(-k * (z - 5))), pts = [];
   for (let z = 5; z <= 15.0001; z += 0.1) pts.push([+z.toFixed(1), f(z)]);
@@ -1703,24 +1831,22 @@ function start() {
 
   const labDonut = new Donut();
   const lab = new Panel(q("#lab"), labDonut, { target: 100, min: 5.4, max: 8.6, aspect: 0.31, warm: 2.6, onLayout: () => fov() });
-  const zoomIn = q("#lab-zoom"), fogIn = q("#lab-fog"), zetaIn = q("#lab-zeta");
+  const zoomIn = q("#lab-zoom"), fogIn = q("#lab-fog");
   function fov() {
     if (!labDonut.w) return;
     const deg = z => Math.round(2 * Math.atan((labDonut.w / 2) / (labDonut.focal() * z)) * 180 / Math.PI);
     q("#lab-fov").textContent = "view across: " + deg(labDonut.o.zoom) + "° (" + deg(1) + "° spinning)";
   }
   function applyLab() {
-    labDonut.o.zoom = +zoomIn.value; labDonut.o.fog = +fogIn.value; labDonut.o.zeta = +zetaIn.value;
-    q("#lab-zeta-out").textContent = (+zetaIn.value).toFixed(2);
+    labDonut.o.zoom = +zoomIn.value; labDonut.o.fog = +fogIn.value;
     q("#lab-zoom-out").textContent = (+zoomIn.value).toFixed(1) + "×";
     q("#lab-fog-out").textContent = (+fogIn.value).toFixed(2);
-    fov(); fogChart(+fogIn.value); springChart(+zetaIn.value); lab.render();
+    fov(); fogChart(+fogIn.value); lab.render();
   }
   zoomIn.addEventListener("input", applyLab);
   fogIn.addEventListener("input", applyLab);
-  zetaIn.addEventListener("input", applyLab);
   document.querySelectorAll('input[name="lab-ratio"]').forEach(r => r.addEventListener("change", () => { labDonut.o.ratio = +r.value; labDonut.trail = []; lab.render(); }));
-  q("#lab-reset").addEventListener("click", () => { zoomIn.value = 2.5; fogIn.value = 0.06; zetaIn.value = 0.38; q("#lr-2").checked = true; labDonut.o.ratio = 2; applyLab(); });
+  q("#lab-reset").addEventListener("click", () => { zoomIn.value = 2.5; fogIn.value = 0.06; q("#lr-2").checked = true; labDonut.o.ratio = 2; applyLab(); });
 
   new Panel(q("#matrix-term"), new Matrix(), { target: 90, min: 5.6, max: 9, aspect: 0.28, warm: 3 });
   new Panel(q("#fire-term"), new Fire(), { target: 90, min: 5.6, max: 9, aspect: 0.3, warm: 3 });
@@ -1728,9 +1854,9 @@ function start() {
   pend.onReset = energyChart;
   energyChart(pend.p[0].s.slice());
   new Panel(q("#pend-term"), pend, { target: 90, min: 5.6, max: 9, aspect: 0.36, warm: 4 });
+  new Panel(q("#ripple-term"), new Ripples(), { target: 100, min: 5.4, max: 8.6, aspect: 0.34, warm: 0.5 });
 
   fogChart(0.06);
-  springChart(0.38);
   const relayout = () => panels.forEach(p => p.layout());
   relayout();
   if ("ResizeObserver" in window) {
@@ -1751,5 +1877,6 @@ function start() {
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start); else start();
 })();
 </script>
+
 </body>
 </html>
