@@ -70,13 +70,20 @@ enum Key {
     KEY_DOWN,
     KEY_LEFT,
     KEY_RIGHT,
+    KEY_CLICK,   // a mouse click (or a drag with the button held): term::lastClick() says where
 };
 
 namespace term {
+struct Click {
+    int x = 0, y = 0;    // the cell, counting from 0 at the top left
+    bool drag = false;   // true while the button is held down and the mouse moves
+};
+
 void init();                       // enter "animation mode": alternate screen, hidden cursor, ANSI on
 void restore();                    // put the console back the way we found it
 void size(int& cols, int& rows);   // visible size of the console window, in character cells
-int readKey();                     // next key press (lower-cased), or KEY_NONE. Never waits.
+int readKey();                     // next key press (lower-cased), KEY_CLICK, or KEY_NONE. Never waits.
+const Click& lastClick();          // where the most recent KEY_CLICK happened
 void clearScreen();
 }  // namespace term
 

@@ -11,6 +11,7 @@
 //     resize(w, h)        once at the start, and again whenever the window changes size
 //     every frame:
 //         onKey(key)      for each key pressed since the last frame
+//         onClick(x, y)   for each mouse click (macOS terminals report the mouse; see platform_mac.cpp)
 //         update(dt)      move the simulation forward by dt seconds   (changes the state)
 //         draw(canvas)    paint the current state onto the canvas     (only looks at the state)
 //
@@ -23,6 +24,7 @@ public:
     virtual const char* help() const = 0;   // key hints shown in the status bar
     virtual void resize(int w, int h) = 0;
     virtual void onKey(int key) = 0;
+    virtual void onClick(int /*x*/, int /*y*/, bool /*drag*/) {}   // optional: most simulations ignore the mouse
     virtual void update(double dt) = 0;
     virtual void draw(Canvas& cv) = 0;
 };
@@ -32,6 +34,7 @@ std::unique_ptr<Simulation> makeDonut();
 std::unique_ptr<Simulation> makeMatrix();
 std::unique_ptr<Simulation> makeFire();
 std::unique_ptr<Simulation> makePendulum();
+std::unique_ptr<Simulation> makeRipples();
 
 // Small convenience wrapper around the C++ <random> library.
 class Random {

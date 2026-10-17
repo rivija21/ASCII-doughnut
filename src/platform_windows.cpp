@@ -89,6 +89,12 @@ void term::size(int& cols, int& rows) {
     }
 }
 
+// This console code only reads the keyboard, so readKey() never returns KEY_CLICK on Windows.
+const term::Click& term::lastClick() {
+    static const Click none{};
+    return none;
+}
+
 int term::readKey() {
     if (!_kbhit()) return KEY_NONE;
     const int k = _getch();

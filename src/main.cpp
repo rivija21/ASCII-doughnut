@@ -38,7 +38,9 @@ const MenuItem kItems[] = {
     {'2', "Matrix digital rain", "particles, fading trails, colour themes", makeMatrix},
     {'3', "Doom fire", "cellular automaton, fixed time step, palettes", makeFire},
     {'4', "Double pendulum", "physics, RK4 integration, chaos", makePendulum},
+    {'5', "Ripple tank", "the wave equation: click to drop a pebble", makeRipples},
 };
+constexpr int kNumItems = sizeof(kItems) / sizeof(kItems[0]);
 
 bool tooSmall(int w, int h) { return w < kMinWidth || h < kMinHeight; }
 
@@ -76,10 +78,14 @@ void runSimulation(Simulation& sim) {
         // 2. Input.
         for (int k = term::readKey(); k != KEY_NONE; k = term::readKey()) {
             if (k == 'q' || k == KEY_ESC) return;
-            if (k == 'p')
+            if (k == KEY_CLICK) {
+                const term::Click& c = term::lastClick();
+                if (!tooSmall(w, h) && c.y < h - 1) sim.onClick(c.x, c.y, c.drag);   // not on the status bar
+            } else if (k == 'p') {
                 paused = !paused;
-            else
+            } else {
                 sim.onKey(k);
+            }
         }
 
         // 3. Update, 4. draw, 5. show.
@@ -106,6 +112,8 @@ const MenuItem* menu() {
     FrameClock clock(kFps);
     int lastW = -1, lastH = -1;
     double time = 0;
+    int itemRow[kNumItems];   // where each item was drawn last frame, so a click can pick it
+    std::fill_n(itemRow, kNumItems, -1);
 
     while (true) {
         int w, h;
@@ -121,10 +129,13 @@ const MenuItem* menu() {
             if (k == 'q' || k == KEY_ESC) return nullptr;
             for (const MenuItem& item : kItems)
                 if (k == item.key) return &item;
+            if (k == KEY_CLICK && !term::lastClick().drag)
+                for (int i = 0; i < kNumItems; ++i)
+                    if (term::lastClick().y == itemRow[i]) return &kItems[i];
         }
 
         cv.clear();
-        const int contentHeight = kTitleRows + 11;
+        const int contentHeight = kTitleRows + 12;
         int y = std::max(0, (h - contentHeight) / 2);
         const int titleX = std::max(0, (w - kTitleWidth) / 2);
 
@@ -142,7 +153,9 @@ const MenuItem* menu() {
         y += 2;
 
         const int listX = std::max(0, (w - 72) / 2);
-        for (const MenuItem& item : kItems) {
+        for (int i = 0; i < kNumItems; ++i) {
+            const MenuItem& item = kItems[i];
+            itemRow[i] = y;
             cv.text(listX, y, std::string("[") + item.key + "]", Color{255, 200, 60});
             cv.text(listX + 5, y, item.title, kWhite);
             cv.text(listX + 28, y, item.teaches, kGrey);

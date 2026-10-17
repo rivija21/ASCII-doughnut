@@ -4,6 +4,6 @@
 #   -arch arm64 -arch x86_64   one "universal" program that runs on Apple-chip AND Intel Macs
 cd "$(dirname "$0")" || exit 1
 c++ -std=c++17 -O2 -Wall -Wextra -arch arm64 -arch x86_64 \
-    src/main.cpp src/terminal.cpp src/platform_mac.cpp src/donut.cpp src/matrix.cpp src/fire.cpp src/pendulum.cpp \
+    src/main.cpp src/terminal.cpp src/platform_mac.cpp src/donut.cpp src/matrix.cpp src/fire.cpp src/pendulum.cpp src/ripples.cpp \
     -o ascii-sims || { echo "Build FAILED."; exit 1; }
 echo "Built ./ascii-sims"

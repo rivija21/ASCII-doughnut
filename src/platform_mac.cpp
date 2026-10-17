@@ -29,9 +29,13 @@ termios originalSettings;   // the terminal's settings before we changed them
 std::atomic<bool> active{false};
 bool rgbColour = true;
 
-// The same escape codes as on Windows (term::init() in platform_windows.cpp explains each one).
-const char kEnterCodes[] = "\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[2J";
-const char kLeaveCodes[] = "\x1b[0m\x1b[?7h\x1b[?25h\x1b[?1049l";
+// The same escape codes as on Windows (term::init() in platform_windows.cpp explains each one),
+// plus three that ask the terminal to report the mouse:
+//   ESC[?1000h  tell us about button presses     ESC[?1002h  ...and moves while a button is held
+//   ESC[?1006h  send them in the "SGR" format: ESC [ < button ; column ; row M  (see readKey)
+const char kEnterCodes[] = "\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[2J\x1b[?1000h\x1b[?1002h\x1b[?1006h";
+const char kLeaveCodes[] = "\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[0m\x1b[?7h\x1b[?25h\x1b[?1049l";
+term::Click click;   // the last mouse click, for term::lastClick()
 
 // write() may send only part of a big frame, or be interrupted by a signal, so keep going until
 // everything is out. Only "async-signal-safe" calls (write, tcsetattr, signal, raise...) are used
@@ -158,9 +162,14 @@ void term::size(int& cols, int& rows) {
     }
 }
 
+const term::Click& term::lastClick() { return click; }
+
 // Keys arrive as bytes. Letters are one byte each, but the arrow keys send a short "escape code":
 //   Up = ESC [ A    Down = ESC [ B    Right = ESC [ C    Left = ESC [ D
 // (sometimes ESC O A..D instead). A lone ESC, with nothing after it, is the Esc key itself.
+// The mouse sends escape codes too: ESC [ < 0 ; 12 ; 5 M is "left button pressed at column 12,
+// row 5" (counting from 1). The first number is the button, plus 32 if the mouse is moving with the
+// button held. M means pressed, m means released.
 int term::readKey() {
     const int c = readByte();
     if (c < 0) return KEY_NONE;
@@ -168,11 +177,20 @@ int term::readKey() {
 
     const int next = readByteSoon();
     if (next != '[' && next != 'O') return KEY_ESC;
-    // Skip any numbers and ';' (Shift+Up is ESC [ 1 ; 2 A) up to the final letter.
-    int last;
-    do {
-        last = readByteSoon();
-    } while (last >= 0 && (last < 0x40 || last > 0x7e));
+    // Collect any numbers and ';' (Shift+Up is ESC [ 1 ; 2 A) up to the final letter.
+    char params[32];
+    int n = 0, last;
+    while ((last = readByteSoon()) >= 0 && (last < 0x40 || last > 0x7e))
+        if (n < int(sizeof params) - 1) params[n++] = char(last);
+    params[n] = '\0';
+
+    if (params[0] == '<' && last == 'M') {   // a mouse report (we ignore releases, 'm')
+        int button = 0, col = 0, row = 0;
+        if (std::sscanf(params + 1, "%d;%d;%d", &button, &col, &row) != 3) return KEY_NONE;
+        if (button != 0 && button != 32) return KEY_NONE;   // only the left button: no wheel, no right-click
+        click = {col - 1, row - 1, button == 32};
+        return KEY_CLICK;
+    }
     switch (last) {
         case 'A': return KEY_UP;
         case 'B': return KEY_DOWN;

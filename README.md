@@ -1,13 +1,14 @@
 # ASCII Sims
 
-Four animations drawn with plain text characters in a terminal, on **macOS** or **Windows**, written in C++17:
+Five animations drawn with plain text characters in a terminal, on **macOS** or **Windows**, written in C++17:
 
 | # | Simulation | What you see | Main idea it teaches |
 |---|---|---|---|
-| 1 | **Flying 3D donut** | A shaded torus tumbling and swooping round a figure-8 through 3D space, popping with ripples as it passes | 3D rotation, perspective projection, z-buffer, lighting, un-projection, damped springs |
+| 1 | **Flying 3D donut** | A shaded torus tumbling and swooping round a figure-8 through 3D space | 3D rotation, perspective projection, z-buffer, lighting, un-projection |
 | 2 | **Matrix digital rain** | Green streams of falling characters | Particles, fading trails, colour |
 | 3 | **Doom fire** | Flames rising from the bottom | Cellular automaton, fixed time step, palettes |
 | 4 | **Double pendulum** | A chaotic pendulum with a glowing trail | Differential equations, RK4 integration, chaos |
+| 5 | **Ripple tank** | Click the water: rings spread out, cross and interfere | The wave equation, finite differences, the CFL limit, interference |
 
 This README is a study guide. It explains how the program works and the maths and C++ behind it,
 so you can come back later and understand every line.
@@ -74,13 +75,12 @@ real Windows console. Either run `winpty ./ascii-sims.exe` there, or use one of 
 
 | Where | Key | Action |
 |---|---|---|
-| Menu | `1`–`4` | Start a simulation |
+| Menu | `1`–`5`, or click a line | Start a simulation |
 | Menu | `Q` / `Esc` | Quit |
 | Any simulation | `P` | Pause / resume |
 | Any simulation | `Q` / `Esc` | Back to the menu |
 | Donut | `M` | Fly round the figure-8 ↔ spin in place (it glides between the two) |
 | Donut | `T` | Trail on / off (the dotted path behind the flying donut) |
-| Donut | `Space` | Pulse: the donut pops and sends out ripple rings (it also pulses by itself each time it swoops closest) |
 | Donut | `+` / `-` | Spin and fly faster / slower |
 | Donut | `C` | Colour on / off |
 | Matrix | `+` / `-` | Rain faster / slower |
@@ -92,6 +92,12 @@ real Windows console. Either run `winpty ./ascii-sims.exe` there, or use one of 
 | Pendulum | `T` | Add or remove a "twin" pendulum that starts 0.001 rad away |
 | Pendulum | `I` | Switch integrator: RK4 ↔ Euler (watch the energy) |
 | Pendulum | `+` / `-` | Simulation speed ×2 / ÷2 |
+| Ripple tank | click / drag | Drop a pebble where you click; drag to trail your finger through the water (macOS) |
+| Ripple tank | `Space` | Drop a pebble somewhere random (works without a mouse, e.g. on Windows) |
+| Ripple tank | `E` | Edges: open water (waves leave) ↔ walls (waves bounce back) |
+| Ripple tank | `W` | Wave maker on / off: a bar on the left that sends straight waves |
+| Ripple tank | `B` | Barrier with two slits on / off (with `W`: Young's double-slit experiment) |
+| Ripple tank | `C` | Calm the water |
 
 ---
 
@@ -114,7 +120,8 @@ ASCII-doughnut/
     ├── donut.cpp            simulation 1
     ├── matrix.cpp           simulation 2
     ├── fire.cpp             simulation 3
-    └── pendulum.cpp         simulation 4
+    ├── pendulum.cpp         simulation 4
+    └── ripples.cpp          simulation 5
 ```
 
 Each build script compiles exactly one of the two `platform_*.cpp` files. Everything else is
@@ -264,6 +271,16 @@ nothing when no key is waiting. The original settings are saved and put back at 
 **Arrow keys are escape codes too.** Up arrives as three bytes, `ESC [ A` (Down `B`, Right `C`,
 Left `D`). So when `readKey()` sees an ESC, it waits up to 20 ms (`poll()`) for more bytes. If none
 come, it was the Esc key itself.
+
+**The mouse is escape codes too.** At the start the program sends `ESC[?1000h` (report button
+presses), `ESC[?1002h` (and movement while a button is held) and `ESC[?1006h` (in the "SGR" format).
+From then on a left click at column 12, row 5 arrives as the bytes `ESC [ < 0 ; 12 ; 5 M` (counting
+from 1; `m` instead of `M` is the release, and the first number is 32 while dragging). `readKey()`
+collects the bytes between `[` and the final letter, returns `KEY_CLICK`, and `term::lastClick()`
+says where. `main.cpp` passes it to the simulation's `onClick(x, y, drag)`, which every simulation
+has but only the ripple tank uses (the default does nothing). The menu uses clicks too: click a line
+to start that simulation. The leave codes turn reporting off again, including on Ctrl+C, so your
+shell doesn't fill up with mouse codes afterwards. The Windows version reads only the keyboard.
 
 **Signals.** macOS tells a program about Ctrl+C by sending it a *signal* (`SIGINT`), and about a
 closed window with `SIGHUP`. A signal handler runs in the middle of whatever the program was doing,
@@ -447,56 +464,6 @@ newest ones through the hole: the centre of a donut is in the middle of its hole
 **The numbers at the top** show the depth `z` and how big the donut looks compared with `z = 5`:
 apparent size is proportional to `1 / z`, so at `z = 10` it looks half as big.
 
-### 4.8 The pulse: a damped spring and a blast wave
-
-Each time the flying donut swoops through the middle of the 8 (and whenever you press `Space`), it
-**pulses** like a drop hitting water: it pops, and ripple rings spread out from where it was.
-
-**The pop is a damped spring.** The donut's size is `s = 1 + x`, and `x` behaves like a weight on a
-spring with friction:
-
-```
-x'' = −ω0²·x − 2ζ·ω0·x'          ω0 = 17 rad/s (how stiff),  ζ = 0.38 (how much damping)
-```
-
-The spring pulls `x` back to 0 (normal size) and the damping takes energy out. A pulse is a sudden
-kick to the speed, `x' += 6.9`, like flicking the weight. What happens next depends on `ζ`, the
-**damping ratio**: with `ζ = 0` it would wobble for ever, with `ζ ≥ 1` it would creep back without
-overshooting, and in between it bounces. Each overshoot is `e^(−πζ/√(1−ζ²)) = 0.28` times the one
-before, which gives the "natural" pop: **1.25× after 75 ms, back down to 0.93× at 274 ms, and within
-1% of normal by 541 ms**. That springy overshoot is what makes UI animations on phones feel physical.
-
-The spring is stepped like the pendulum, in fixed 1 ms steps (§3.4), with **semi-implicit Euler**:
-
-```cpp
-swellV_ += (-kSpringW0 * kSpringW0 * swell_ - 2 * kSpringZeta * kSpringW0 * swellV_) * h;   // speed first...
-swell_  += swellV_ * h;                                                                       // ...then move with the NEW speed
-```
-
-Plain Euler (§7.3) would work out both lines from the *old* values, moving with the speed from
-before this step. For an oscillator that slowly pumps energy in: with no damping, its wobble would
-grow by about 15% every second here. Using the new speed to move is just as cheap and doesn't.
-
-A swollen donut is closer to you at its nearest point, so the sampling steps of §4.6 use the swollen
-size, `zNearest = c.z − (R1 + R2)·s`. A test that compares frames against a much denser rendering
-found no new sampling holes, and with no pulse the spin-in-place mode still draws exactly what the
-original program did.
-
-**The rings grow like a blast wave.** A sudden burst of energy spreading into its surroundings slows
-down as it sweeps up more of them; for an explosion in open air the shock front's radius grows as
-`r ∝ t^(2/5)` (the Sedov–Taylor blast wave). The rings use the same law:
-
-```
-r(t) = (R1 + R2) · (1.1 + 1.6 · (t / 1.2 s)^0.4)        brightness = (1 − t / 1.2 s)²
-```
-
-`t^0.4` starts infinitely fast and keeps slowing down, so a ring bursts out of the donut and then
-drifts to a stop as it fades. A second, fainter ring follows 0.15 s later, like the second ripple in
-a pond. On screen each ring is an ellipse `rx` columns wide and `rx/2` rows tall (cells are twice as
-tall as wide), drawn as `~`, then `-`, then `.` as it fades. Its dots go through the donut's z-buffer
-like the trail, so the donut hides any part of a ring behind it, and the rings stay where the
-splash happened while the donut flies on.
-
 ---
 
 ## 5. Simulation 2: Matrix rain ([src/matrix.cpp](src/matrix.cpp))
@@ -665,8 +632,78 @@ The twin isn't a numerical error either: RK4 is accurate here, and the physics i
   points are drawn dimmer and with smaller characters (`*` → `:` → `.`).
 
 ---
+## 8. Simulation 5: the ripple tank ([src/ripples.cpp](src/ripples.cpp))
 
-## 8. C++ features used (and where)
+Click anywhere and a pebble drops in: a ring of waves pops out from that spot and spreads. Click
+twice and the two rings pass through each other. This is real water physics: the **2D wave
+equation**.
+
+### 8.1 The wave equation
+
+`u(x, y)` is how far the water is above (or below) its calm level. For small waves:
+
+```
+∂²u/∂t² = c² · (∂²u/∂x² + ∂²u/∂y²)
+```
+
+The left side is the water's acceleration. The right side is the surface's **curvature** (the
+*Laplacian*): it is large where a point sits lower than the average of its neighbours. So every bit
+of water accelerates towards the average of its neighbours. A dip pulls the water round it down,
+which pulls the water round *that* down, and the disturbance travels outwards as a ring at speed `c`.
+
+### 8.2 On a grid: finite differences
+
+A second derivative is "how much the slope changes", which on a grid is a difference of differences:
+`∂²u/∂x² ≈ u[x−1] − 2u[x] + u[x+1]`. The same for time gives the update the code runs for every cell:
+
+```
+next = u + (u − prev) + C² · (left + right + up + down − 4u)
+       ^ keep moving     ^ accelerate towards the average of the four neighbours
+```
+
+`prev` is the water one step ago, so `u − prev` is its speed. Each cell's new value only needs its
+own `prev`, so the code writes `next` straight into `prev` and then swaps the two arrays.
+
+**Square cells.** The grid has two rows for every terminal row, so its cells are square (one column
+wide, half a row tall) and rings come out round instead of stretched. Each terminal cell shows the
+two grid cells behind it.
+
+### 8.3 The CFL limit: why the step size matters
+
+`C = c·Δt/Δx` is the **Courant number**: how many cells a wave moves in one step. In 2D the method
+is only stable when `C² ≤ 0.5`: a wave must not jump more than about one cell per step, or errors
+grow every step and the numbers explode (the Courant–Friedrichs–Lewy condition). The program uses
+`C² = 0.25` with 90 fixed steps per second (§3.4), so waves travel `0.5 × 90 = 45` cells per second.
+A test with no damping ran 30 s calmly at `C² = 0.25` and `0.45`; at `0.55` the whole screen
+saturated within 2 seconds.
+
+### 8.4 Drops, damping, edges and light
+
+- **A drop** pushes the water down in a smooth Gaussian dip, `depth · e^(−r²/2σ²)` with `σ = 2` cells.
+  A one-cell spike would contain wiggles shorter than the grid can carry, which leave messy trails.
+  `u` and `prev` both move, so the water starts still, just out of place.
+- **Damping** takes 0.7% of each cell's motion every step, so ripples fade over a few seconds.
+- **Edges.** At a wall the code uses the cell's own value for the missing neighbour: the surface
+  meets the wall flat, which makes waves bounce straight back, like the side of a real tank. In
+  **open water** mode (the default) the last 10 cells round the edge get extra damping that rises
+  gradually towards the wall: a "sponge" that soaks waves up, so each ring leaves the screen instead
+  of filling the tank. (Damping that switched on suddenly would itself reflect waves.)
+- **Light.** The water is drawn by its tilt, as if lit from the top left: a slope facing the light is
+  bright, a slope facing away is dark blue, and flat water is left blank.
+
+### 8.5 Interference and Young's double slit
+
+Waves simply **add up**: where two crests meet the water rises twice as high, and where a crest meets
+a trough they cancel. Press `W` for the wave maker, a bar on the left that bobs up and down 5.5 times
+a second and sends out straight waves 8 cells apart (45 ÷ 5.5). Then press `B` to put a wall in the
+way with two narrow gaps. Each gap becomes a new source of circular waves, and beyond the wall they
+overlap in fanned-out stripes: calm lines where the two sets always cancel, rough lines where they
+always add. That is **Young's double-slit experiment** (1801), the experiment that showed light is
+a wave.
+
+---
+
+## 9. C++ features used (and where)
 
 | Feature | Where | Why |
 |---|---|---|
@@ -684,6 +721,8 @@ The twin isn't a numerical error either: RK4 is accurate here, and the physics i
 | Signal handlers | `onQuitSignal`, `onSuspend` in `platform_mac.cpp` | Restore the terminal on Ctrl+C / Ctrl+Z |
 | `static` member function | `Donut::room()` | A helper that belongs to the class but needs no object |
 | Raw string literals `R"( ... )"` | the title in `main.cpp` | Backslashes in ASCII art without escaping them |
+| A virtual function with a default body | `Simulation::onClick` | Optional to override: only the ripple tank does |
+| `std::vector::swap` | `u_.swap(prev_)` in ripples.cpp | Swap two whole grids instantly (just the pointers) |
 | `<random>` (`std::mt19937`) | `Random` in `sim.h` | Better random numbers than `rand()` |
 | `<chrono>` | `FrameClock` | Precise time measurement |
 
@@ -706,7 +745,7 @@ parameter types, so only the `Vec3` version was considered. Hence the point vers
 
 ---
 
-## 9. Things to try (exercises)
+## 10. Things to try (exercises)
 
 Start easy and work down the list:
 
@@ -718,34 +757,35 @@ Start easy and work down the list:
    from `a2`, then watch the energy fall instead of staying constant. Try `m2 = 0.1` or `L2 = 0.5`.
 5. **Pendulum:** halve `kStep` and compare Euler's drift before and after (it should roughly halve).
    Do the same with RK4 (it should shrink about 16×).
-6. **Add a 5th simulation**, e.g. Conway's Game of Life:
+6. **Add a 6th simulation**, e.g. Conway's Game of Life (clicks could toggle cells):
    1. create `src/life.cpp` with `class Life : public Simulation { ... }` and `makeLife()`;
    2. declare `std::unique_ptr<Simulation> makeLife();` in `sim.h`;
-   3. add `{'5', "Game of Life", "...", makeLife}` to `kItems` in `main.cpp`;
-   4. add `src\life.cpp` to `build.bat`.
+   3. add `{'6', "Game of Life", "...", makeLife}` to `kItems` in `main.cpp`;
+   4. add `src/life.cpp` to `build.sh` and `src\life.cpp` to `build.bat`.
 7. **Donut flight:** in `flightCentre()`, change `sin(2 * t)` to `sin(3 * t)` (a different Lissajous
    figure), or make `z(t)` use `sin(t)` instead of `cos(2t)` so one loop is near and the other far. Set `kFlyZoom` to 1
    to see the wide-angle stretching for yourself, and `kFogDensity` to 0.2 for thick fog.
-   For the pulse, try `kSpringZeta = 0.1` (a jelly that wobbles for a long time) and `1.0` (no bounce
-   at all). Then set it to 0 and turn `stepSpring()` into plain Euler (move with the speed from before
-   the step, e.g. save `const double v = swellV_;` first and use `swell_ += v * h;`): the wobble grows.
-8. **Port to Linux:** `platform_mac.cpp` only uses POSIX calls (`termios`, `ioctl`, `poll`, signals),
+8. **Ripple tank:** set `kCourant2` to 0.55 and watch the CFL limit break. Set `kDamping` to 0 and
+   switch to walls (`E`) to see the waves bounce for ever. Move the slits further apart in
+   `buildWalls()` and the interference stripes get closer together.
+9. **Port to Linux:** `platform_mac.cpp` only uses POSIX calls (`termios`, `ioctl`, `poll`, signals),
    which Linux has too. Try building it there with `g++` instead of `c++`, without the `-arch` flags.
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 | Problem | Fix |
 |---|---|
 | Mac: `permission denied: ./build.sh` | Run `chmod +x build.sh "Run ASCII Sims.command"` once. |
 | Mac: "Not running in a terminal" | Start it from Terminal (or double-click `Run ASCII Sims.command`), not from another app. |
 | Mac: `xcrun: error: invalid active developer path` | Run `xcode-select --install` to get the compiler. |
+| Mac: clicking the ripple tank does nothing | In Terminal, make sure **Allow Mouse Reporting** (View menu) is ticked. |
 | Windows: you see text like `←[38;2;255;…` | The console doesn't understand ANSI codes. Use Windows Terminal. |
 | Windows: "Not running in a Windows console" | You started it from Git Bash (mintty) or redirected its output. Use Windows Terminal / PowerShell / cmd, or `winpty ./ascii-sims.exe`. |
 | Low fps or stutter on a huge window | Zoom in (`Ctrl` + `+`) for fewer cells. The old console (conhost) is slower than Windows Terminal. |
 | Windows: `g++` not found | Add `C:\msys64\ucrt64\bin` to your `PATH`. |
 | The terminal looks broken after a crash (no cursor, odd screen) | Close and reopen the tab. Normally the Ctrl+C handler prevents this. |
 
-## 11. Further reading
+## 12. Further reading
 
 - Andy Sloane, *Donut math: how donut.c works*: https://www.a1k0n.net/2011/07/20/donut-math.html
 - Fabien Sanglard, *How DOOM fire was done*: https://fabiensanglard.net/doom_fire_psx/
